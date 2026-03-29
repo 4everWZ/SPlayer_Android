@@ -15,10 +15,12 @@ dist-ssr
 coverage
 *.local
 out
+dist_mobile
 .env
 target
 *.node
 .env.mobile
+.codex-worktrees/
 
 # Editor directories and files
 .vscode/*
@@ -36,6 +38,14 @@ target
 # Docs
 docs/.vitepress/cache
 docs/.vitepress/dist
+
+# Android
+android/.gradle/
+android/**/build/
+android/local.properties
+android/app/src/main/assets/public/
+android/app/src/main/assets/capacitor.config.json
+android/app/src/main/assets/capacitor.plugins.json
 
 # AI
 .trae/*

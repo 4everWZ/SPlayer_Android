@@ -1,10 +1,11 @@
 import vue from "@vitejs/plugin-vue";
 import { defineConfig } from "vite";
+import type { UserConfig } from "vite";
 import { resolve } from "path";
+import type { DeprecationOrId } from "sass";
 import AutoImport from "unplugin-auto-import/vite";
 import { NaiveUiResolver } from "unplugin-vue-components/resolvers";
 import Components from "unplugin-vue-components/vite";
-import viteCompression from "vite-plugin-compression";
 import wasm from "vite-plugin-wasm";
 
 const commonResolve = {
@@ -17,9 +18,12 @@ const commonResolve = {
   },
 };
 
-export default defineConfig(() => {
+const scssSilenceDeprecations: DeprecationOrId[] = ["legacy-js-api"];
+
+export default defineConfig((): UserConfig => {
   return {
     root: ".",
+    publicDir: resolve(__dirname, "public"),
     plugins: [
       vue(),
       AutoImport({
@@ -39,14 +43,13 @@ export default defineConfig(() => {
       Components({
         resolvers: [NaiveUiResolver()],
       }),
-      viteCompression(),
       wasm(),
     ],
     resolve: commonResolve,
     css: {
       preprocessorOptions: {
         scss: {
-          silenceDeprecations: ["legacy-js-api"],
+          silenceDeprecations: scssSilenceDeprecations,
         },
       },
     },
@@ -55,7 +58,6 @@ export default defineConfig(() => {
       emptyOutDir: true,
       minify: "terser",
       target: "es2022",
-      publicDir: resolve(__dirname, "public"),
       rollupOptions: {
         input: {
           index: resolve(__dirname, "index.html"),

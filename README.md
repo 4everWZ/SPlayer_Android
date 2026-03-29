@@ -36,7 +36,7 @@
 - Node.js 版本要求：>= 20，包管理器：pnpm >= 10
 - 默认会构建原生模块，需准备 Rust 工具链；如仅需要网页端构建或暂时跳过，可设置环境变量 `SKIP_NATIVE_BUILD=true`
 - 支持网页端与客户端，由于设备有限，目前仅保证 Windows 系统的适配，其他平台如遇问题可以提 Issue 或自行解决后选择提 PR
-<!-- - 仅对移动端做了基础适配，**不保证功能全部可用** -->
+- 当前提供基于 Capacitor 的 Android 轻壳方案，适合自编译调试与私有 API 自用场景
 
 <!--  > 请注意，本程序不打算开发移动端，也不会对移动端进行完美适配，仅保证基础可用性 -->
 
@@ -56,6 +56,23 @@
 ### 跳过原生模块构建
 
 默认会编译 `native/*` 下的原生模块（需要 Rust）。如果你的场景不需要原生能力，可设置 `SKIP_NATIVE_BUILD=true` 后再执行 `pnpm dev` / `pnpm build`。
+
+### Android 自编译
+
+当前 Android 版本基于 `Capacitor + dist_mobile`，默认输出可安装的 `debug APK`，适合本地调试或连接你自己部署的 Netease API。
+
+1. 复制 `.env.example` 为 `.env.mobile`，并把 `VITE_API_URL` 改成你自己的 API 地址
+2. 执行 `pnpm install`
+3. 执行 `pnpm build:mobile`
+4. 执行 `pnpm cap:sync`
+5. 进入 `android` 目录后执行 `.\gradlew.bat assembleDebug`
+
+生成的 APK 默认位于 `android/app/build/outputs/apk/debug/app-debug.apk`
+
+> [!NOTE]
+>
+> - `.env.mobile` 已加入 `.gitignore`，请不要提交你自己的 API 地址
+> - 当前 `debug` 构建允许连接 `http://` API，方便本地自测；如需分发或正式使用，建议改为 `https://`
 
 ## 💬 交流群
 
@@ -260,6 +277,17 @@ docker run -d --name SPlayer -p 25884:25884 imsyy/splayer:latest
    | `pnpm build:win`   | Windows  |
    | `pnpm build:linux` | Linux    |
    | `pnpm build:mac`   | macOS    |
+
+#### ⚙️ Android 自编译 APK
+
+1. 准备 Android Studio、Android SDK、JDK 21 及 `adb`
+2. 复制 `.env.example` 为 `.env.mobile`，把 `VITE_API_URL` 改成你自己的 API 地址
+3. 执行 `pnpm build:mobile`
+4. 执行 `pnpm cap:sync`
+5. 进入 `android` 目录执行 `.\gradlew.bat assembleDebug`
+6. 使用 `adb install -r android/app/build/outputs/apk/debug/app-debug.apk` 安装到手机
+
+当前仓库不会内置公共 Netease API，请自行部署兼容接口或使用你自己的服务地址。
 
 ## 😘 鸣谢
 
