@@ -93,5 +93,19 @@ watch(
     flex: 1;
     overflow: hidden;
   }
+  @media (max-width: 768px) {
+    .title {
+      margin-top: 8px;
+      margin-bottom: 10px;
+      font-size: 16px;
+      .keyword {
+        font-size: 26px;
+        margin-right: 6px;
+      }
+    }
+    .tabs {
+      --n-tab-font-size: 13px !important;
+    }
+  }
 }
 </style>

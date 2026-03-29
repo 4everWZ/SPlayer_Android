@@ -1,5 +1,6 @@
 import { useSettingStore } from "@/stores";
 import { isElectron } from "@/utils/env";
+import { isCapacitor, openExternalLink } from "@/utils/platform";
 import { SettingConfig } from "@/types/settings";
 import { computed, ref, h, markRaw } from "vue";
 import { debounce } from "lodash-es";
@@ -150,7 +151,16 @@ export const useNetworkSettings = (): SettingConfig => {
       const authUrl = getAuthUrl(token);
 
       if (typeof window !== "undefined") {
-        const authWindow = window.open(authUrl, "_blank", "width=800,height=600");
+        let authWindow: Window | null = null;
+        if (isCapacitor) {
+          window.$message.info("请在系统浏览器中完成 Last.fm 授权后返回应用");
+          await openExternalLink(authUrl);
+        } else {
+          authWindow = window.open(authUrl, "_blank", "width=800,height=600");
+          if (!authWindow) {
+            throw new Error("浏览器阻止了授权窗口，请允许弹窗后重试");
+          }
+        }
         const checkAuth = setInterval(async () => {
           if (authWindow?.closed) {
             clearInterval(checkAuth);

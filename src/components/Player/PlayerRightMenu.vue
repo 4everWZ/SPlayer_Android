@@ -51,7 +51,7 @@
     </n-badge>
     <!-- 其他控制 -->
     <n-dropdown
-      v-if="settingStore.fullscreenPlayerElements.moreSettings"
+      v-if="settingStore.fullscreenPlayerElements.moreSettings && !isSmallScreen"
       :options="controlsOptions"
       :show-arrow="false"
       @select="handleControls"
@@ -60,6 +60,13 @@
         <SvgIcon name="Controls" />
       </div>
     </n-dropdown>
+    <div
+      v-else-if="settingStore.fullscreenPlayerElements.moreSettings"
+      class="menu-icon hidden"
+      @click.stop="showControlsDrawer = true"
+    >
+      <SvgIcon name="Controls" />
+    </div>
     <!-- 音量 -->
     <n-popover :show-arrow="false" :style="{ padding: 0 }">
       <template #trigger>
@@ -94,11 +101,38 @@
         <SvgIcon name="PlayList" />
       </div>
     </n-badge>
+    <n-drawer
+      v-model:show="showControlsDrawer"
+      placement="bottom"
+      class="player-controls-drawer"
+      height="auto"
+    >
+      <n-drawer-content
+        title="更多控制"
+        :native-scrollbar="false"
+        :body-content-style="{ padding: '0 16px calc(env(safe-area-inset-bottom) + 16px)' }"
+      >
+        <n-flex vertical size="small" class="mobile-action-list">
+          <n-button
+            v-for="item in controlsOptions"
+            :key="String(item.key)"
+            :disabled="!!item.disabled"
+            block
+            strong
+            secondary
+            @click="handleMobileControl(item)"
+          >
+            {{ getControlsLabel(item) }}
+          </n-button>
+        </n-flex>
+      </n-drawer-content>
+    </n-drawer>
   </n-flex>
 </template>
 
 <script setup lang="ts">
 import { usePlayerController } from "@/core/player/PlayerController";
+import { useMobile } from "@/composables/useMobile";
 import { useDataStore, useSettingStore, useStatusStore, useMusicStore } from "@/stores";
 import { isElectron } from "@/utils/env";
 import { renderIcon } from "@/utils/helper";
@@ -112,6 +146,7 @@ const statusStore = useStatusStore();
 const settingStore = useSettingStore();
 const musicStore = useMusicStore();
 const player = usePlayerController();
+const { isSmallScreen } = useMobile();
 
 const {
   currentPlayingLevel,
@@ -124,6 +159,7 @@ const {
 
 const showQualityPopover = ref(false);
 const qualityTagRef = ref<HTMLElement | null>(null);
+const showControlsDrawer = ref(false);
 
 const handleQualityClick = async () => {
   if (showQualityPopover.value) {
@@ -192,6 +228,16 @@ const handleControls = (key: string) => {
       openChangeRate();
       break;
   }
+};
+
+const getControlsLabel = (option: DropdownOption) => {
+  return typeof option.label === "string" ? option.label : String(option.key || "");
+};
+
+const handleMobileControl = (option: DropdownOption) => {
+  if (option.disabled) return;
+  handleControls(String(option.key));
+  showControlsDrawer.value = false;
 };
 
 // 更新音质数据
@@ -278,6 +324,12 @@ watch([() => dataStore.userData.vipType, () => settingStore.disableAiAudio], asy
     margin-top: 8px;
     font-size: 13px;
     white-space: nowrap;
+  }
+}
+
+.mobile-action-list {
+  .n-button {
+    justify-content: flex-start;
   }
 }
 </style>

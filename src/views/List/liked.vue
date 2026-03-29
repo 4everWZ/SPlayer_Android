@@ -48,7 +48,7 @@ import { SongType } from "@/types/main";
 import { songDetail } from "@/api/song";
 import { playlistDetail, playlistAllSongs, songOrderUpdate } from "@/api/playlist";
 import { formatCoverList, formatSongsList } from "@/utils/format";
-import { renderIcon, copyData, getShareUrl } from "@/utils/helper";
+import { openLink, renderIcon, shareResource } from "@/utils/helper";
 import { isObject } from "lodash-es";
 import { useDataStore, useStatusStore } from "@/stores";
 import { openBatchList, openUpdatePlaylist } from "@/utils/modal";
@@ -152,7 +152,12 @@ const moreOptions = computed<DropdownOption[]>(() => [
     label: "复制分享链接",
     key: "copy",
     props: {
-      onClick: () => copyData(getShareUrl("playlist", playlistId.value), "已复制分享链接到剪贴板"),
+      onClick: () =>
+        shareResource("playlist", playlistId.value, {
+          title: detailData.value?.name,
+          text: detailData.value?.name,
+          dialogTitle: "分享歌单",
+        }),
     },
     icon: renderIcon("Share"),
   },
@@ -160,9 +165,7 @@ const moreOptions = computed<DropdownOption[]>(() => [
     label: "打开源页面",
     key: "open",
     props: {
-      onClick: () => {
-        window.open(`https://music.163.com/#/playlist?id=${playlistId.value}`);
-      },
+      onClick: () => openLink(`https://music.163.com/#/playlist?id=${playlistId.value}`),
     },
     icon: renderIcon("Link"),
   },

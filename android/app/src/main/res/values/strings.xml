@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">SPlayer</string>
+    <string name="title_activity_main">SPlayer</string>
+    <string name="package_name">top.imsyy.splayer</string>
+    <string name="custom_url_scheme">top.imsyy.splayer</string>
+</resources>

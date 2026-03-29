@@ -50,6 +50,7 @@
 <script setup lang="ts">
 import type { UpdateInfoType } from "@/types/main";
 import { useStatusStore } from "@/stores";
+import { openExternalLink } from "@/utils/platform";
 import packageJson from "@/../package.json";
 
 const props = defineProps<{ data: UpdateInfoType }>();
@@ -71,7 +72,7 @@ const handleMarkdownClick = (event: MouseEvent) => {
   const anchor = target.closest("a");
   if (anchor?.href) {
     event.preventDefault();
-    window.open(anchor.href, "_blank");
+    void openExternalLink(anchor.href);
   }
 };
 
@@ -88,7 +89,7 @@ const doInstall = () => {
 // 前往下载
 const goDownload = () => {
   emit("close");
-  window.open("https://splayer.imsyy.top/download.html", "_blank");
+  void openExternalLink("https://splayer.imsyy.top/download.html");
 };
 </script>
 

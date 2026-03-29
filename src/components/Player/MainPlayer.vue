@@ -76,9 +76,22 @@
               "
             />
             <!-- 更多操作 -->
-            <n-dropdown :options="songMoreOptions" trigger="click" placement="top-start">
+            <n-dropdown
+              v-if="!isSmallScreen"
+              :options="songMoreOptions"
+              trigger="click"
+              placement="top-start"
+            >
               <SvgIcon name="FormatList" :size="20" :depth="2" class="more" />
             </n-dropdown>
+            <SvgIcon
+              v-else
+              name="FormatList"
+              :size="20"
+              :depth="2"
+              class="more"
+              @click="showSongMoreDrawer = true"
+            />
           </div>
           <div class="lyric-container">
             <Transition
@@ -97,7 +110,11 @@
               <!-- 歌手 -->
               <div v-else class="artists">
                 <TextContainer :speed="0.5" class="artists-container">
-                  <n-text v-if="musicStore.playSong.type === 'radio'" class="ar-item" @click="showCreatorTip">
+                  <n-text
+                    v-if="musicStore.playSong.type === 'radio'"
+                    class="ar-item"
+                    @click="showCreatorTip"
+                  >
                     {{ musicStore.playSong.dj?.creator || "未知艺术家" }}
                   </n-text>
                   <template v-else-if="Array.isArray(musicStore.playSong.artists)">
@@ -236,17 +253,43 @@
         <PlayerRightMenu />
       </n-flex>
     </Transition>
+    <n-drawer
+      v-model:show="showSongMoreDrawer"
+      placement="bottom"
+      class="player-song-drawer"
+      height="auto"
+    >
+      <n-drawer-content
+        title="更多操作"
+        :native-scrollbar="false"
+        :body-content-style="{ padding: '0 16px calc(env(safe-area-inset-bottom) + 16px)' }"
+      >
+        <n-flex vertical size="small" class="mobile-action-list">
+          <n-button
+            v-for="item in mobileSongMoreOptions"
+            :key="String(item.key)"
+            block
+            strong
+            secondary
+            @click="handleSongMoreAction(item)"
+          >
+            {{ getSongMoreLabel(item) }}
+          </n-button>
+        </n-flex>
+      </n-drawer-content>
+    </n-drawer>
   </div>
 </template>
 
 <script setup lang="ts">
 import { usePlayerController } from "@/core/player/PlayerController";
 import { useSongManager } from "@/core/player/SongManager";
+import { useMobile } from "@/composables/useMobile";
 import { useDataStore, useMusicStore, useSettingStore, useStatusStore } from "@/stores";
 import { toLikeSong } from "@/utils/auth";
 import { useTimeFormat } from "@/composables/useTimeFormat";
 import { useSwipe } from "@vueuse/core";
-import { copyData, coverLoaded, renderIcon, getShareUrl } from "@/utils/helper";
+import { copyData, coverLoaded, renderIcon, shareResource } from "@/utils/helper";
 import {
   openAutoClose,
   openChangeRate,
@@ -267,10 +310,12 @@ const settingStore = useSettingStore();
 
 const player = usePlayerController();
 const songManager = useSongManager();
+const { isSmallScreen } = useMobile();
 
 const { timeDisplay, toggleTimeFormat } = useTimeFormat();
 
 const playerRef = ref<HTMLElement | null>(null);
+const showSongMoreDrawer = ref(false);
 
 // 触摸滑动切换歌曲
 const { direction } = useSwipe(playerRef, {
@@ -330,7 +375,12 @@ const songMoreOptions = computed<DropdownOption[]>(() => {
           label: `分享${song.type === "song" ? "歌曲" : "节目"}链接`,
           show: !isLocal,
           props: {
-            onClick: () => copyData(getShareUrl(song.type, song.id), "已复制分享链接到剪切板"),
+            onClick: () =>
+              shareResource(song.type, song.id, {
+                title: song.name,
+                text: song.name,
+                dialogTitle: `分享${song.type === "song" ? "歌曲" : "节目"}`,
+              }),
           },
           icon: renderIcon("Share", { size: 18 }),
         },
@@ -399,6 +449,34 @@ const songMoreOptions = computed<DropdownOption[]>(() => {
   ];
 });
 
+const mobileSongMoreOptions = computed<DropdownOption[]>(() => {
+  const options: DropdownOption[] = [];
+  songMoreOptions.value.forEach((item) => {
+    if (item.show === false || item.type === "divider") return;
+    if (item.children?.length) {
+      item.children.forEach((child) => {
+        if (child.show === false || child.type === "divider") return;
+        options.push(child);
+      });
+      return;
+    }
+    options.push(item);
+  });
+  return options;
+});
+
+const getSongMoreLabel = (option: DropdownOption) => {
+  return typeof option.label === "string" ? option.label : String(option.key || "");
+};
+
+const handleSongMoreAction = (option: DropdownOption) => {
+  const onClick = option.props?.onClick;
+  if (typeof onClick === "function") {
+    (onClick as () => void)();
+  }
+  showSongMoreDrawer.value = false;
+};
+
 // 是否展示歌词
 const isShowLyrics = computed(() => {
   const isHasLrc = musicStore.isHasLrc;
@@ -432,9 +510,9 @@ const showCreatorTip = () => window.$message.info("暂不支持查看主播主�
 .main-player {
   position: fixed;
   left: 0;
-  bottom: -90px;
-  height: 80px;
-  padding: 0 15px;
+  bottom: calc(-90px - env(safe-area-inset-bottom));
+  height: calc(80px + env(safe-area-inset-bottom));
+  padding: 0 15px env(safe-area-inset-bottom) 15px;
   width: 100%;
   background-color: var(--surface-container-hex);
   display: grid;
@@ -694,6 +772,12 @@ const showCreatorTip = () => window.$message.info("暂不支持查看主播主�
         display: none;
       }
     }
+  }
+}
+
+.mobile-action-list {
+  .n-button {
+    justify-content: flex-start;
   }
 }
 </style>

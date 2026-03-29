@@ -9,6 +9,7 @@ import { convertToLocalTime } from "./time";
 import { useSettingStore } from "@/stores";
 import { marked } from "marked";
 import { isElectron } from "./env";
+import { openExternalLink, shareLink as sharePlatformLink } from "./platform";
 import SvgIcon from "@/components/Global/SvgIcon.vue";
 import Fuse from "fuse.js";
 
@@ -20,7 +21,7 @@ type AnyObject = { [key: string]: any };
  * @param target 打开方式（_self 或 _blank）
  */
 export const openLink = (url: string, target: "_self" | "_blank" = "_blank") => {
-  window.open(url, target);
+  void openExternalLink(url, target);
 };
 
 /**
@@ -491,4 +492,38 @@ export const getShareUrl = (type: string, id: number | string): string => {
   }
 
   return `https://music.163.com/#/${type}?id=${id}`;
+};
+
+/**
+ * 分享链接
+ * @param url 链接地址
+ * @param options 分享参数
+ */
+export const shareLink = async (
+  url: string,
+  options: {
+    title?: string;
+    text?: string;
+    dialogTitle?: string;
+  } = {},
+) => {
+  return sharePlatformLink(url, options);
+};
+
+/**
+ * 分享资源链接
+ * @param type 资源类型
+ * @param id 资源 ID
+ * @param options 分享参数
+ */
+export const shareResource = async (
+  type: string,
+  id: number | string,
+  options: {
+    title?: string;
+    text?: string;
+    dialogTitle?: string;
+  } = {},
+) => {
+  return shareLink(getShareUrl(type, id), options);
 };

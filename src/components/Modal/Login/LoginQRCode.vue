@@ -7,8 +7,8 @@
       >
         <n-qr-code
           :value="qrImg"
-          :size="160"
-          :icon-size="30"
+          :size="qrSize"
+          :icon-size="isSmallScreen ? 26 : 30"
           icon-src="/icons/favicon.png?asset"
           error-correction-level="H"
         />
@@ -39,6 +39,7 @@
 
 <script setup lang="ts">
 import { qrKey, checkQr } from "@/api/login";
+import { useMobile } from "@/composables/useMobile";
 import { LoginType } from "@/types/main";
 import { coverLoaded } from "@/utils/helper";
 
@@ -49,6 +50,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   saveLogin: [any, LoginType];
 }>();
+const { isSmallScreen } = useMobile();
 
 // 状态提示
 const qrCodeTip = {
@@ -67,6 +69,7 @@ const qrStatusCode = ref<keyof typeof qrCodeTip>(801);
 const qrTipText = computed(() => {
   return qrCodeTip[qrStatusCode.value] || "遇到未知状态，请重试";
 });
+const qrSize = computed(() => (isSmallScreen.value ? 144 : 160));
 
 // 待确认数据
 const loginName = ref<string>("");
@@ -148,8 +151,8 @@ onBeforeUnmount(pauseCheck);
   .qr-img {
     display: flex;
     margin: 20px 0;
-    width: 180px;
-    height: 180px;
+    width: clamp(144px, 44vw, 180px);
+    height: clamp(144px, 44vw, 180px);
     border-radius: 12px;
     overflow: hidden;
     .qr {
@@ -161,10 +164,10 @@ onBeforeUnmount(pauseCheck);
       height: 100%;
       .n-qr-code {
         padding: 0;
-        height: 180px;
-        width: 180px;
-        min-height: 180px;
-        min-width: 180px;
+        height: 100%;
+        width: 100%;
+        min-height: 100%;
+        min-width: 100%;
         transition:
           opacity 0.3s,
           filter 0.3s;
@@ -197,6 +200,7 @@ onBeforeUnmount(pauseCheck);
   }
   .tip {
     margin-bottom: 12px;
+    text-align: center;
   }
 }
 </style>

@@ -15,7 +15,7 @@
           <div class="list-header song-card sticky-header">
             <n-text class="num">#</n-text>
             <n-popover
-              v-if="!disabledSort"
+              v-if="!disabledSort && !isSmallScreen"
               trigger="click"
               placement="bottom-start"
               :show-arrow="false"
@@ -61,6 +61,12 @@
                 </div>
               </div>
             </n-popover>
+            <div v-else-if="!disabledSort" class="title has-sort" @click="showSortDrawer = true">
+              <n-text>标题</n-text>
+              <n-text v-if="statusStore.listSortField !== 'default'" class="sort" depth="3">
+                {{ sortFieldOptions[statusStore.listSortField].name }}
+              </n-text>
+            </div>
             <n-text v-else class="title">标题</n-text>
             <n-text
               v-if="
@@ -97,11 +103,21 @@
               <div v-if="item.type === 'song'" class="song-node">
                 <!-- 拖拽放置指示线 -->
                 <div
-                  v-if="isDragging && draggable && dropIndicator.index === index && dropIndicator.position === 'top'"
+                  v-if="
+                    isDragging &&
+                    draggable &&
+                    dropIndicator.index === index &&
+                    dropIndicator.position === 'top'
+                  "
                   class="drop-line line-top"
                 />
                 <div
-                  v-if="isDragging && draggable && dropIndicator.index === index && dropIndicator.position === 'bottom'"
+                  v-if="
+                    isDragging &&
+                    draggable &&
+                    dropIndicator.index === index &&
+                    dropIndicator.position === 'bottom'
+                  "
                   class="drop-line line-bottom"
                 />
                 <SongCard
@@ -111,8 +127,16 @@
                   :hiddenCover="hiddenCover || settingStore.hiddenCovers.list"
                   :hiddenAlbum="hiddenAlbum"
                   :hiddenSize="hiddenSize"
-                  @mousedown="draggable ? handlePointerDown($event, index, item.data.name || '未知曲目') : undefined"
-                  @touchstart="draggable ? handlePointerDown($event, index, item.data.name || '未知曲目') : undefined"
+                  @mousedown="
+                    draggable
+                      ? handlePointerDown($event, index, item.data.name || '未知曲目')
+                      : undefined
+                  "
+                  @touchstart="
+                    draggable
+                      ? handlePointerDown($event, index, item.data.name || '未知曲目')
+                      : undefined
+                  "
                   @click.stop="handleSongClick(item.data)"
                   @dblclick.stop="handleSongPlay(item.data)"
                   @contextmenu.stop="handleShowMenu($event, item.data, index)"
@@ -138,6 +162,49 @@
         @removeSong="removeSong"
       />
       <MobileSongMenu ref="mobileSongMenuRef" @removeSong="removeSong" />
+      <n-drawer
+        v-model:show="showSortDrawer"
+        placement="bottom"
+        class="song-sort-drawer"
+        height="auto"
+      >
+        <n-drawer-content
+          title="列表排序"
+          :native-scrollbar="false"
+          :body-content-style="{ padding: '0 16px calc(env(safe-area-inset-bottom) + 16px)' }"
+        >
+          <div class="sort-menu mobile">
+            <div class="group">
+              <div class="label">排序字段</div>
+              <n-radio-group
+                v-model:value="statusStore.listSortField"
+                name="sortFieldMobile"
+                @update:value="(val) => handleSortFieldChange(val)"
+              >
+                <n-flex :vertical="true" size="small">
+                  <n-radio v-for="(option, key) in sortFieldOptions" :key="key" :value="key">
+                    {{ option.name }}
+                  </n-radio>
+                </n-flex>
+              </n-radio-group>
+            </div>
+            <div class="group">
+              <div class="label">排序方式</div>
+              <n-radio-group
+                v-model:value="statusStore.listSortOrder"
+                name="sortOrderMobile"
+                @update:value="(val) => handleSortOrderChange(val)"
+              >
+                <n-flex :vertical="true" size="small">
+                  <n-radio v-for="(option, key) in sortOrderOptions" :key="key" :value="key">
+                    {{ option.name }}
+                  </n-radio>
+                </n-flex>
+              </n-radio-group>
+            </div>
+          </div>
+        </n-drawer-content>
+      </n-drawer>
       <!-- 列表操作 -->
       <Teleport to="body">
         <Transition name="fade" mode="out-in">
@@ -296,6 +363,7 @@ const scrollIndex = ref<number>(0);
 
 // 悬浮工具
 const floatToolShow = ref<boolean>(true);
+const showSortDrawer = ref(false);
 
 // 右键菜单
 const songListMenuRef = ref<InstanceType<typeof SongListMenu> | null>(null);
@@ -790,6 +858,16 @@ onBeforeUnmount(() => {
         &:hover {
           background-color: var(--n-color-target);
         }
+      }
+    }
+  }
+  &.mobile {
+    flex-direction: column;
+    gap: 16px;
+    padding: 0;
+    .group {
+      .n-radio-group {
+        width: 100%;
       }
     }
   }

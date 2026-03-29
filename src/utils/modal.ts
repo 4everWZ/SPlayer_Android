@@ -38,6 +38,49 @@ const setModalClosed = (modalKey: string): void => {
   openedModals.delete(modalKey);
 };
 
+const mergeModalClass = (...classNames: Array<string | false | undefined>) =>
+  classNames.filter(Boolean).join(" ");
+
+const isCompactScreen = () => window.matchMedia("(max-width: 768px)").matches;
+
+const getResponsiveModalOptions = (
+  style: Record<string, string> = {},
+  options: {
+    className?: string;
+    fullScreenOnMobile?: boolean;
+  } = {},
+) => {
+  const { className, fullScreenOnMobile = false } = options;
+  if (!isCompactScreen()) {
+    return {
+      class: className,
+      style,
+    };
+  }
+  return {
+    class: mergeModalClass(
+      className,
+      "mobile-modal-card",
+      fullScreenOnMobile && "mobile-modal-fullscreen",
+    ),
+    style: fullScreenOnMobile
+      ? {
+          ...style,
+          width: "100vw",
+          maxWidth: "100vw",
+          height: "100dvh",
+          margin: "0",
+        }
+      : {
+          ...style,
+          width: "calc(100vw - 24px)",
+          maxWidth: "calc(100vw - 24px)",
+          maxHeight: "calc(100dvh - 24px)",
+          margin: "12px auto",
+        },
+  };
+};
+
 export const openUserAgreement = async () => {
   const settingStore = useSettingStore();
   // 检查是否需要重新同意协议
@@ -125,6 +168,7 @@ export const openUserLogin = async (
 ) => {
   if (showTip) window.$message.warning("请登录后使用");
   const { default: Login } = await import("@/components/Modal/Login/Login.vue");
+  const responsiveModal = getResponsiveModalOptions({ width: "400px" });
   const modal = window.$modal.create({
     preset: "card",
     transformOrigin: "center",
@@ -132,7 +176,7 @@ export const openUserLogin = async (
     maskClosable: false,
     closeOnEsc: false,
     closable: false,
-    style: { width: "400px" },
+    ...responsiveModal,
     content: () => {
       return h(Login, {
         force,
@@ -193,11 +237,12 @@ export const openPlaylistAdd = async (data: SongType[], isLocal: boolean) => {
   if (!data.length) return window.$message.warning("请正确选择歌曲");
   if (!isLogin() && !isLocal) return openUserLogin();
   const { default: PlaylistAdd } = await import("@/components/Modal/PlaylistAdd.vue");
+  const responsiveModal = getResponsiveModalOptions({ width: "600px" });
   const modal = window.$modal.create({
     preset: "card",
     transformOrigin: "center",
     autoFocus: false,
-    style: { width: "600px" },
+    ...responsiveModal,
     title: isLocal ? "添加到本地歌单" : "添加到歌单",
     content: () => {
       return h(PlaylistAdd, { data, isLocal, onClose: () => modal.destroy() });
@@ -213,13 +258,12 @@ export const openPlaylistAdd = async (data: SongType[], isLocal: boolean) => {
  */
 export const openBatchList = async (data: SongType[], isLocal: boolean, playListId?: number) => {
   const { default: BatchList } = await import("@/components/Modal/BatchList.vue");
+  const responsiveModal = getResponsiveModalOptions({ maxWidth: "70vw" });
   window.$modal.create({
     preset: "card",
     transformOrigin: "center",
     autoFocus: false,
-    style: {
-      maxWidth: "70vw",
-    },
+    ...responsiveModal,
     title: "批量操作",
     content: () => h(BatchList, { data, isLocal, playListId }),
   });
@@ -243,11 +287,12 @@ export const openCloudMatch = async (id: number, index: number) => {
 // 新建歌单
 export const openCreatePlaylist = async (isLocal: boolean = false) => {
   const { default: CreatePlaylist } = await import("@/components/Modal/CreatePlaylist.vue");
+  const responsiveModal = getResponsiveModalOptions({ width: "600px" });
   const modal = window.$modal.create({
     preset: "card",
     transformOrigin: "center",
     autoFocus: false,
-    style: { width: "600px" },
+    ...responsiveModal,
     title: isLocal ? "新建本地歌单" : "新建歌单",
     content: () => {
       return h(CreatePlaylist, { isLocal, onClose: () => modal.destroy() });
@@ -269,11 +314,12 @@ export const openUpdatePlaylist = async (
   isLocal: boolean = false,
 ) => {
   const { default: UpdatePlaylist } = await import("@/components/Modal/UpdatePlaylist.vue");
+  const responsiveModal = getResponsiveModalOptions({ width: "600px" });
   const modal = window.$modal.create({
     preset: "card",
     transformOrigin: "center",
     autoFocus: false,
-    style: { width: "600px" },
+    ...responsiveModal,
     title: isLocal ? "编辑本地歌单" : "编辑歌单",
     content: () => {
       return h(UpdatePlaylist, {
@@ -300,11 +346,12 @@ export const openDownloadSong = async (song: SongType) => {
     return window.$message.warning("账号会员等级不足，请提升权限");
   }
   const { default: DownloadModal } = await import("@/components/Modal/DownloadModal.vue");
+  const responsiveModal = getResponsiveModalOptions({ width: "600px" });
   const modal = window.$modal.create({
     preset: "card",
     transformOrigin: "center",
     autoFocus: false,
-    style: { width: "600px" },
+    ...responsiveModal,
     title: "下载歌曲",
     content: () => {
       return h(DownloadModal, { songId: song.id, onClose: () => modal.destroy() });
@@ -320,11 +367,12 @@ export const openDownloadSongs = async (songs: SongType[]): Promise<void> => {
     return;
   }
   const { default: DownloadModal } = await import("@/components/Modal/DownloadModal.vue");
+  const responsiveModal = getResponsiveModalOptions({ width: "600px" });
   const modal = window.$modal.create({
     preset: "card",
     transformOrigin: "center",
     autoFocus: false,
-    style: { width: "600px" },
+    ...responsiveModal,
     title: "批量下载",
     content: () => {
       return h(DownloadModal, { songs, onClose: () => modal.destroy() });
@@ -337,6 +385,10 @@ export const openSetting = async (type: SettingType = "general", scrollTo?: stri
   if (isModalOpen("setting", "设置页面已打开")) return;
   setModalOpen("setting");
   const { default: MainSetting } = await import("@/components/Setting/MainSetting.vue");
+  const responsiveModal = getResponsiveModalOptions(
+    {},
+    { className: "main-setting", fullScreenOnMobile: true },
+  );
   window.$modal.create({
     preset: "card",
     transformOrigin: "center",
@@ -344,7 +396,7 @@ export const openSetting = async (type: SettingType = "general", scrollTo?: stri
     maskClosable: false,
     closeOnEsc: false,
     bordered: false,
-    class: "main-setting",
+    ...responsiveModal,
     content: () => {
       return h(MainSetting, { type, scrollTo });
     },
@@ -357,11 +409,12 @@ export const openSetting = async (type: SettingType = "general", scrollTo?: stri
 // 软件更新
 export const openUpdateApp = async (data: UpdateInfoType) => {
   const { default: UpdateApp } = await import("@/components/Modal/UpdateApp.vue");
+  const responsiveModal = getResponsiveModalOptions({ width: "600px" });
   const modal = window.$modal.create({
     preset: "card",
     transformOrigin: "center",
     autoFocus: false,
-    style: { width: "600px" },
+    ...responsiveModal,
     title: "发现新版本",
     content: () => {
       return h(UpdateApp, { data, onClose: () => modal.destroy() });
@@ -372,11 +425,12 @@ export const openUpdateApp = async (data: UpdateInfoType) => {
 /** 打开播放速度弹窗 */
 export const openChangeRate = async () => {
   const { default: ChangeRate } = await import("@/components/Modal/ChangeRate.vue");
+  const responsiveModal = getResponsiveModalOptions({ width: "600px" });
   window.$modal.create({
     preset: "card",
     transformOrigin: "center",
     autoFocus: false,
-    style: { width: "600px" },
+    ...responsiveModal,
     title: "播放速度",
     content: () => {
       return h(ChangeRate);
@@ -387,11 +441,12 @@ export const openChangeRate = async () => {
 /** 打开自动关闭弹窗 */
 export const openAutoClose = async () => {
   const { default: AutoClose } = await import("@/components/Modal/AutoClose.vue");
+  const responsiveModal = getResponsiveModalOptions({ width: "600px" });
   window.$modal.create({
     preset: "card",
     transformOrigin: "center",
     autoFocus: false,
-    style: { width: "600px" },
+    ...responsiveModal,
     title: "自动关闭",
     content: () => {
       return h(AutoClose);
@@ -402,11 +457,12 @@ export const openAutoClose = async () => {
 /** 打开 AB 循环弹窗 */
 export const openABLoop = async () => {
   const { default: ABLoop } = await import("@/components/Modal/ABLoop.vue");
+  const responsiveModal = getResponsiveModalOptions({ width: "500px" });
   window.$modal.create({
     preset: "card",
     transformOrigin: "center",
     autoFocus: false,
-    style: { width: "500px" },
+    ...responsiveModal,
     title: "AB 循环",
     content: () => {
       return h(ABLoop);
@@ -417,11 +473,12 @@ export const openABLoop = async () => {
 /** 打开均衡器弹窗 */
 export const openEqualizer = async () => {
   const { default: Equalizer } = await import("@/components/Modal/Equalizer.vue");
+  const responsiveModal = getResponsiveModalOptions({ width: "620px" });
   window.$modal.create({
     preset: "card",
     transformOrigin: "center",
     autoFocus: false,
-    style: { width: "620px" },
+    ...responsiveModal,
     title: "均衡器",
     content: () => {
       return h(Equalizer);
@@ -434,11 +491,12 @@ export const openEqualizer = async () => {
  * @param content 简介内容
  */
 export const openDescModal = (content: string, title: string = "歌单简介") => {
+  const responsiveModal = getResponsiveModalOptions({ width: "600px" });
   window.$modal.create({
     preset: "card",
     transformOrigin: "center",
     autoFocus: false,
-    style: { width: "600px" },
+    ...responsiveModal,
     title,
     content: () => {
       return h(
@@ -519,11 +577,12 @@ export const openHomePageSectionManager = async () => {
 /** 打开复制歌词弹窗 */
 export const openCopyLyrics = async () => {
   const { default: CopyLyrics } = await import("@/components/Modal/CopyLyrics.vue");
+  const responsiveModal = getResponsiveModalOptions({ width: "500px" });
   const modal = window.$modal.create({
     preset: "card",
     transformOrigin: "center",
     autoFocus: false,
-    style: { width: "500px" },
+    ...responsiveModal,
     title: "复制歌词",
     content: () => {
       return h(CopyLyrics, {
@@ -536,11 +595,12 @@ export const openCopyLyrics = async () => {
 /** 打开歌曲详情复制弹窗 */
 export const openCopySongInfo = async (songId: number) => {
   const { default: CopySongInfo } = await import("@/components/Modal/CopySongInfo.vue");
+  const responsiveModal = getResponsiveModalOptions({ width: "500px" });
   const modal = window.$modal.create({
     preset: "card",
     transformOrigin: "center",
     autoFocus: false,
-    style: { width: "500px" },
+    ...responsiveModal,
     title: "歌曲详情复制",
     content: () => {
       return h(CopySongInfo, {

@@ -52,7 +52,12 @@
       </n-empty>
     </template>
     <!-- 评论 -->
-    <ListComment v-show="currentTab === 'comments'" :id="albumId" :type="3" :height="songListHeight" />
+    <ListComment
+      v-show="currentTab === 'comments'"
+      :id="albumId"
+      :type="3"
+      :height="songListHeight"
+    />
   </div>
 </template>
 
@@ -61,7 +66,7 @@ import type { DropdownOption } from "naive-ui";
 import { songDetail } from "@/api/song";
 import { albumDetail, albumDetailDynamic } from "@/api/album";
 import { formatCoverList, formatSongsList } from "@/utils/format";
-import { renderIcon, copyData, getShareUrl } from "@/utils/helper";
+import { openLink, renderIcon, shareResource } from "@/utils/helper";
 import { openBatchList } from "@/utils/modal";
 import { useDataStore } from "@/stores";
 import { toLikeAlbum } from "@/utils/auth";
@@ -158,7 +163,12 @@ const moreOptions = computed<DropdownOption[]>(() => [
     label: "复制分享链接",
     key: "copy",
     props: {
-      onClick: () => copyData(getShareUrl("album", albumId.value), "已复制分享链接到剪贴板"),
+      onClick: () =>
+        shareResource("album", albumId.value, {
+          title: detailData.value?.name,
+          text: detailData.value?.name,
+          dialogTitle: "分享专辑",
+        }),
     },
     icon: renderIcon("Share"),
   },
@@ -166,9 +176,7 @@ const moreOptions = computed<DropdownOption[]>(() => [
     label: "打开源页面",
     key: "open",
     props: {
-      onClick: () => {
-        window.open(`https://music.163.com/#/album?id=${albumId.value}`);
-      },
+      onClick: () => openLink(`https://music.163.com/#/album?id=${albumId.value}`),
     },
     icon: renderIcon("Link"),
   },

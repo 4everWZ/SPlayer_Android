@@ -343,7 +343,7 @@ const oldVersion = computed<UpdateLogType[]>(() => {
 const checkUpdate = debounce(
   () => {
     if (!isElectron) {
-      window.open(packageJson.github + "/releases", "_blank");
+      openLink(packageJson.github + "/releases");
       return;
     }
     statusStore.updateCheck = true;

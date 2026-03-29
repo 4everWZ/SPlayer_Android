@@ -102,7 +102,20 @@
                 {{ isLikeArtist ? "取消关注" : "关注歌手" }}
               </n-button>
               <!-- 更多 -->
-              <n-dropdown :options="moreOptions" trigger="click" placement="bottom-start">
+              <n-button
+                v-if="isSmallScreen"
+                :focusable="false"
+                class="more"
+                circle
+                strong
+                secondary
+                @click="showMoreDrawer = true"
+              >
+                <template #icon>
+                  <SvgIcon name="List" />
+                </template>
+              </n-button>
+              <n-dropdown v-else :options="moreOptions" trigger="click" placement="bottom-start">
                 <n-button :focusable="false" class="more" circle strong secondary>
                   <template #icon>
                     <SvgIcon name="List" />
@@ -148,17 +161,43 @@
         />
       </Transition>
     </RouterView>
+    <n-drawer
+      v-model:show="showMoreDrawer"
+      placement="bottom"
+      class="artist-action-drawer"
+      height="auto"
+    >
+      <n-drawer-content
+        title="更多操作"
+        :native-scrollbar="false"
+        :body-content-style="{ padding: '0 16px calc(env(safe-area-inset-bottom) + 16px)' }"
+      >
+        <n-flex vertical size="small" class="mobile-action-list">
+          <n-button
+            v-for="item in moreOptions"
+            :key="String(item.key)"
+            block
+            strong
+            secondary
+            @click="handleMoreOptionClick(item)"
+          >
+            {{ getMoreOptionLabel(item) }}
+          </n-button>
+        </n-flex>
+      </n-drawer-content>
+    </n-drawer>
   </div>
 </template>
 
 <script setup lang="ts">
 import type { DropdownOption } from "naive-ui";
 import type { ArtistType } from "@/types/main";
-import { coverLoaded, renderIcon, copyData, getShareUrl } from "@/utils/helper";
+import { coverLoaded, renderIcon, openLink, shareResource } from "@/utils/helper";
 import { renderToolbar } from "@/utils/meta";
 import { openDescModal, openBatchList } from "@/utils/modal";
 import { artistDetail } from "@/api/artist";
 import { formatArtistsList, removeBrackets } from "@/utils/format";
+import { useMobile } from "@/composables/useMobile";
 import { useDataStore, useSettingStore } from "@/stores";
 import { toLikeArtist } from "@/utils/auth";
 import ArtistSongs from "./songs.vue";
@@ -167,6 +206,7 @@ const route = useRoute();
 const router = useRouter();
 const dataStore = useDataStore();
 const settingStore = useSettingStore();
+const { isSmallScreen } = useMobile();
 
 // 路由元素
 const componentRef = ref<InstanceType<typeof ArtistSongs> | null>(null);
@@ -182,6 +222,7 @@ const artistDetailData = ref<ArtistType | null>(null);
 
 // 列表是否滚动
 const listScrolling = ref<boolean>(false);
+const showMoreDrawer = ref(false);
 
 // 更多操作
 const moreOptions = computed<DropdownOption[]>(() => [
@@ -208,7 +249,12 @@ const moreOptions = computed<DropdownOption[]>(() => [
     label: "复制分享链接",
     key: "copy",
     props: {
-      onClick: () => copyData(getShareUrl("artist", artistId.value), "已复制分享链接到剪贴板"),
+      onClick: () =>
+        shareResource("artist", artistId.value, {
+          title: artistDetailData.value?.name,
+          text: artistDetailData.value?.name,
+          dialogTitle: "分享歌手",
+        }),
     },
     icon: renderIcon("Share"),
   },
@@ -216,9 +262,7 @@ const moreOptions = computed<DropdownOption[]>(() => [
     label: "打开源页面",
     key: "open",
     props: {
-      onClick: () => {
-        window.open(`https://music.163.com/#/artist?id=${artistId.value}`);
-      },
+      onClick: () => openLink(`https://music.163.com/#/artist?id=${artistId.value}`),
     },
     icon: renderIcon("Link"),
   },
@@ -257,6 +301,18 @@ const tabChange = (value: string) => {
 const playAllSongs = async () => {
   await router.push({ name: "artist-songs", query: { id: artistId.value } });
   if (componentRef.value) componentRef.value.playAllSongs();
+};
+
+const getMoreOptionLabel = (option: DropdownOption) => {
+  return typeof option.label === "string" ? option.label : String(option.key || "");
+};
+
+const handleMoreOptionClick = (option: DropdownOption) => {
+  const onClick = option.props?.onClick;
+  if (typeof onClick === "function") {
+    (onClick as () => void)();
+  }
+  showMoreDrawer.value = false;
 };
 
 // 列表滚动
@@ -470,6 +526,12 @@ watch(
         padding-top: 160px;
       }
     }
+  }
+}
+
+.mobile-action-list {
+  .n-button {
+    justify-content: flex-start;
   }
 }
 </style>

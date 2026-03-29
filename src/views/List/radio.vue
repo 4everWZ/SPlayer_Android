@@ -53,14 +53,19 @@
       </n-empty>
     </template>
     <!-- 评论 -->
-    <ListComment v-show="currentTab === 'comments'" :id="radioId" :type="7" :height="songListHeight" />
+    <ListComment
+      v-show="currentTab === 'comments'"
+      :id="radioId"
+      :type="7"
+      :height="songListHeight"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 import type { DropdownOption, MessageReactive } from "naive-ui";
 import { formatCoverList, formatSongsList } from "@/utils/format";
-import { renderIcon, copyData, getShareUrl } from "@/utils/helper";
+import { openLink, renderIcon, shareResource } from "@/utils/helper";
 import { useDataStore } from "@/stores";
 import { radioAllProgram, radioDetail } from "@/api/radio";
 import { useListDetail } from "@/composables/List/useListDetail";
@@ -165,7 +170,12 @@ const moreOptions = computed<DropdownOption[]>(() => [
     label: "复制分享链接",
     key: "copy",
     props: {
-      onClick: () => copyData(getShareUrl("djradio", radioId.value), "已复制分享链接到剪贴板"),
+      onClick: () =>
+        shareResource("djradio", radioId.value, {
+          title: detailData.value?.name,
+          text: detailData.value?.name,
+          dialogTitle: "分享播客",
+        }),
     },
     icon: renderIcon("Share"),
   },
@@ -173,9 +183,7 @@ const moreOptions = computed<DropdownOption[]>(() => [
     label: "打开源页面",
     key: "open",
     props: {
-      onClick: () => {
-        window.open(`https://music.163.com/#/djradio?id=${radioId.value}`);
-      },
+      onClick: () => openLink(`https://music.163.com/#/djradio?id=${radioId.value}`),
     },
     icon: renderIcon("Link"),
   },

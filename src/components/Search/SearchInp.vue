@@ -244,13 +244,15 @@ onMounted(() => {
     }
   }
   @media (max-width: 768px) {
-    width: calc(100% - 150px);
+    width: 100%;
+    max-width: calc(100vw - 136px);
     .search-input {
       width: 100%;
     }
     &.focus {
-      left: -52px;
-      width: calc(100% + 52px);
+      width: 100%;
+      max-width: calc(100vw - 24px);
+      z-index: 120;
       .search-input {
         width: 100%;
       }

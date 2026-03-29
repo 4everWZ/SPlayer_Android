@@ -2,7 +2,7 @@
   <div class="login">
     <img src="/icons/favicon.png?asset" alt="logo" class="logo" />
     <!-- 登录方式 -->
-    <n-tabs class="login-tabs" default-value="login-qr" type="segment" animated>
+    <n-tabs class="login-tabs" default-value="login-qr" type="segment" :animated="!isSmallScreen">
       <n-tab-pane name="login-qr" tab="扫码登录">
         <LoginQRCode :pause="qrPause" @saveLogin="saveLogin" />
       </n-tab-pane>
@@ -38,6 +38,7 @@
 </template>
 
 <script setup lang="ts">
+import { useMobile } from "@/composables/useMobile";
 import { setCookies } from "@/utils/cookie";
 import { updateSpecialUserData, updateUserData } from "@/utils/auth";
 import { useDataStore } from "@/stores";
@@ -58,13 +59,13 @@ const emit = defineEmits<{
 }>();
 
 const dataStore = useDataStore();
+const { isSmallScreen } = useMobile();
 
 // 暂停二维码检查
 const qrPause = ref(false);
 
 // 保存登录信息
 const saveLogin = async (loginData: any, type: LoginType = "qr") => {
-  console.log("loginData:", loginData);
   if (!loginData) return;
   if (loginData.code === 200) {
     // 更改状态
@@ -91,11 +92,19 @@ const saveLogin = async (loginData: any, type: LoginType = "qr") => {
 // 特殊登录
 const specialLogin = (type: "uid" | "cookie" = "uid") => {
   qrPause.value = true;
+  const compact = window.matchMedia("(max-width: 768px)").matches;
   const loginModal = window.$modal.create({
     title: type === "uid" ? "UID 登录" : "Cookie 登录",
     preset: "card",
     transformOrigin: "center",
-    style: { width: "400px" },
+    class: compact ? "mobile-modal-card" : undefined,
+    style: compact
+      ? {
+          width: "calc(100vw - 24px)",
+          maxWidth: "calc(100vw - 24px)",
+          margin: "12px auto",
+        }
+      : { width: "400px" },
     content: () => {
       return h(type === "uid" ? LoginUID : LoginCookie, {
         onClose: () => loginModal.destroy(),
@@ -124,12 +133,18 @@ onBeforeMount(() => {
   align-items: center;
   justify-content: center;
   flex-direction: column;
+  width: min(100%, 360px);
+  margin: 0 auto;
+  .login-tabs {
+    width: 100%;
+  }
   .logo {
     width: 60px;
     height: 60px;
     margin: 20px auto 30px auto;
   }
   .other {
+    width: 100%;
     margin: 20px 0;
     .n-button {
       width: 140px;
@@ -137,6 +152,29 @@ onBeforeMount(() => {
   }
   .close {
     margin-bottom: 8px;
+  }
+  @media (max-width: 768px) {
+    width: 100%;
+    .logo {
+      width: 52px;
+      height: 52px;
+      margin: 8px auto 20px auto;
+    }
+    .other {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 8px !important;
+      .n-divider {
+        display: none;
+      }
+      .n-button {
+        width: 100%;
+      }
+    }
+    .close {
+      width: 100%;
+      margin-bottom: 0;
+    }
   }
 }
 </style>

@@ -144,13 +144,14 @@ onMounted(() => {
     transition-delay: 0.25s;
   }
   :deep(.scrollbar) {
-    max-height: calc(100vh - 160px);
+    max-height: calc(100dvh - 160px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
     .n-scrollbar-content {
       padding: 10px;
     }
   }
   @media (max-width: 768px) {
     width: 100%;
+    max-width: calc(100vw - 24px);
   }
   .title {
     display: flex;
@@ -200,6 +201,7 @@ onMounted(() => {
         flex: 1;
         width: 100%;
         padding-right: 8px;
+        min-width: 0;
         .name {
           font-size: 16px;
           display: flex;
@@ -214,6 +216,7 @@ onMounted(() => {
         pointer-events: none;
       }
       .hot {
+        flex-shrink: 0;
         display: flex;
         flex-direction: row;
         align-items: center;

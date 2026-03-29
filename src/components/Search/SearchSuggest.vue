@@ -233,20 +233,21 @@ watchDebounced(
   width: 300px;
   border-radius: 8px;
   overflow: hidden;
-  max-height: calc(100vh - 160px);
+  max-height: calc(100dvh - 160px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
   z-index: 101;
   transition:
     height 0.3s ease,
     opacity 0.3s ease,
     transform 0.3s ease;
   :deep(.scrollbar) {
-    max-height: calc(100vh - 160px);
+    max-height: calc(100dvh - 160px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
     .n-scrollbar-content {
       padding: 10px;
     }
   }
   @media (max-width: 768px) {
     width: 100%;
+    max-width: calc(100vw - 24px);
   }
   .direct {
     display: flex;
@@ -284,6 +285,7 @@ watchDebounced(
         padding: 14px 18px 14px 22px;
         margin-bottom: 8px;
         border-radius: 8px;
+        overflow: hidden;
         transition: background-color 0.3s;
         cursor: pointer;
         .name {

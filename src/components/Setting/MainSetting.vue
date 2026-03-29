@@ -132,7 +132,7 @@ import type { MenuOption, NScrollbar, SelectOption } from "naive-ui";
 import { SettingItem, SettingGroup } from "@/types/settings";
 import type { SettingType } from "@/types/main";
 import { useMobile } from "@/composables/useMobile";
-import { renderIcon } from "@/utils/helper";
+import { openLink, renderIcon } from "@/utils/helper";
 import { isElectron } from "@/utils/env";
 import { useStatusStore } from "@/stores";
 import { getDisplayVersion, isNightly } from "@/utils/version";
@@ -345,7 +345,7 @@ const menuOptions: MenuOption[] = [
 
 // 跳转
 const toGithub = () => {
-  window.open(packageJson.github);
+  openLink(packageJson.github);
 };
 
 onMounted(() => {
@@ -419,6 +419,8 @@ onMounted(() => {
     }
   }
   @media (max-width: 768px) {
+    height: 100%;
+    min-height: 100%;
     .mobile-overlay {
       display: block;
       position: absolute;
@@ -450,6 +452,11 @@ onMounted(() => {
           margin-bottom: 0;
           line-height: normal;
           margin: 0;
+        }
+      }
+      .set-content {
+        :deep(.n-scrollbar-content) {
+          min-height: 100%;
         }
       }
     }
@@ -535,10 +542,11 @@ onMounted(() => {
       }
     }
     @media (max-width: 768px) {
+      height: 100%;
       .set-content {
         padding: 0 16px;
         .n-scrollbar-content {
-          padding: 12px 0 !important;
+          padding: 12px 0 calc(env(safe-area-inset-bottom) + 20px) !important;
         }
       }
       .set-item {

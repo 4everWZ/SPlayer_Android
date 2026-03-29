@@ -36,11 +36,19 @@
     "build:linux": "pnpm build && electron-builder --linux --config electron-builder.config.ts",
     "docs:dev": "vitepress dev docs",
     "docs:build": "vitepress build docs",
-    "docs:preview": "vitepress preview docs"
+    "docs:preview": "vitepress preview docs",
+    "build:mobile": "rimraf dist_mobile && pnpm typecheck:web && vite build -c vite.config.mobile.ts --mode mobile",
+    "cap:sync": "cap sync android",
+    "cap:open": "cap open android"
   },
   "dependencies": {
     "@applemusic-like-lyrics/core": "^0.2.0",
     "@applemusic-like-lyrics/lyric": "^0.3.0",
+    "@capacitor/android": "^8.3.0",
+    "@capacitor/browser": "^8.0.3",
+    "@capacitor/core": "^8.3.0",
+    "@capacitor/keyboard": "^8.0.2",
+    "@capacitor/share": "^8.0.1",
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
     "@imsyy/color-utils": "^1.0.2",
@@ -83,6 +91,7 @@
     "ws": "^8.19.0"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.3.0",
     "@electron-toolkit/preload": "^3.0.1",
     "@electron-toolkit/tsconfig": "^2.0.0",
     "@electron-toolkit/utils": "^4",

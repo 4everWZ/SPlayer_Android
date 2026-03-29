@@ -9,7 +9,7 @@
     <n-drawer-content
       :native-scrollbar="false"
       :header-style="{ padding: '16px 18px' }"
-      :body-content-style="{ padding: 0 }"
+      :body-content-style="{ padding: '0 0 calc(env(safe-area-inset-bottom) + 16px) 0' }"
       closable
     >
       <template #header>

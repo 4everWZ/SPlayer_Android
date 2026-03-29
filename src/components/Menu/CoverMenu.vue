@@ -16,7 +16,7 @@
 <script setup lang="ts">
 import type { DropdownOption } from "naive-ui";
 import type { CoverType } from "@/types/main";
-import { renderIcon, copyData, getShareUrl } from "@/utils/helper";
+import { renderIcon, copyData, shareResource } from "@/utils/helper";
 import { useMusicStore, useStatusStore } from "@/stores";
 
 const emit = defineEmits<{
@@ -100,7 +100,12 @@ const openDropdown = async (
           label: `分享${type === "playlist" ? "歌单" : type === "album" ? "专辑" : type === "video" ? "视频" : "电台"}链接`,
           show: item.id !== 0 && item.id?.toString().length < 16,
           props: {
-            onClick: () => copyData(getShareUrl(type, item.id), "已复制分享链接到剪贴板"),
+            onClick: () =>
+              shareResource(type, item.id, {
+                title: item.name,
+                text: item.name,
+                dialogTitle: `分享${type === "playlist" ? "歌单" : type === "album" ? "专辑" : type === "video" ? "视频" : "电台"}`,
+              }),
           },
           icon: renderIcon("Share", { size: 18 }),
         },

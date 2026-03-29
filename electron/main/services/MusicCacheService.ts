@@ -86,21 +86,21 @@ export class MusicCacheService {
     }
 
     // 如果找到文件且需要校验 MD5
-     if (filePath && expectedMD5) {
-       try {
-         const fileMD5 = await this.calculateMD5(filePath);
-         if (fileMD5.toLowerCase() !== expectedMD5.toLowerCase()) {
-            cacheLog.info(
-              `[MusicCache] 缓存 MD5 不匹配，删除旧缓存。ID: ${id}, 期望: ${expectedMD5}, 实际: ${fileMD5}`,
-            );
-            await unlink(filePath).catch(() => {});
-            return null;
-          }
-       } catch (error) {
-         cacheLog.error(`[MusicCache] Failed to calculate MD5 for ${filePath}:`, error);
-         return null;
-       }
-     }
+    if (filePath && expectedMD5) {
+      try {
+        const fileMD5 = await this.calculateMD5(filePath);
+        if (fileMD5.toLowerCase() !== expectedMD5.toLowerCase()) {
+          cacheLog.info(
+            `[MusicCache] 缓存 MD5 不匹配，删除旧缓存。ID: ${id}, 期望: ${expectedMD5}, 实际: ${fileMD5}`,
+          );
+          await unlink(filePath).catch(() => {});
+          return null;
+        }
+      } catch (error) {
+        cacheLog.error(`[MusicCache] Failed to calculate MD5 for ${filePath}:`, error);
+        return null;
+      }
+    }
 
     return filePath;
   }

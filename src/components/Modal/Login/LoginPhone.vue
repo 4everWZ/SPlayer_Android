@@ -1,6 +1,12 @@
 <template>
   <div class="login-phone">
-    <n-form ref="phoneFormRef" :model="phoneFormData" :rules="phoneFormRules" class="phone-form">
+    <n-form
+      ref="phoneFormRef"
+      :model="phoneFormData"
+      :rules="phoneFormRules"
+      :label-placement="isSmallScreen ? 'top' : 'left'"
+      class="phone-form"
+    >
       <n-form-item label="国家" path="country">
         <n-select v-model:value="phoneFormData.country" filterable :options="countryListData" />
       </n-form-item>
@@ -18,21 +24,24 @@
         </n-input-number>
       </n-form-item>
       <n-form-item label="验证码" path="captcha">
-        <n-input-number
-          v-model:value="phoneFormData.captcha"
-          :show-button="false"
-          :disabled="phoneFormData.phone === null"
-          placeholder="请输入短信验证码"
-          passively-activated
-          clearable
-        >
-          <template #prefix>
-            <SvgIcon name="Password" :depth="3" />
-          </template>
-        </n-input-number>
-        <n-button :disabled="captchaDisabled" class="send" type="primary" @click="getCaptcha">
-          {{ captchaText }}
-        </n-button>
+        <div class="captcha-row">
+          <n-input-number
+            v-model:value="phoneFormData.captcha"
+            :show-button="false"
+            :disabled="phoneFormData.phone === null"
+            placeholder="请输入短信验证码"
+            passively-activated
+            clearable
+            class="captcha-input"
+          >
+            <template #prefix>
+              <SvgIcon name="Password" :depth="3" />
+            </template>
+          </n-input-number>
+          <n-button :disabled="captchaDisabled" class="send" type="primary" @click="getCaptcha">
+            {{ captchaText }}
+          </n-button>
+        </div>
       </n-form-item>
       <n-form-item :show-label="false">
         <n-button class="login" type="primary" @click="login"> 登录 </n-button>
@@ -44,6 +53,7 @@
 <script setup lang="ts">
 import type { FormInst, FormRules, SelectOption } from "naive-ui";
 import { countryList, sentCaptcha, verifyCaptcha, loginPhone } from "@/api/login";
+import { useMobile } from "@/composables/useMobile";
 import { numberRule, phoneRule } from "@/utils/rules";
 import { getCacheData } from "@/utils/cache";
 import { debounce } from "lodash-es";
@@ -52,6 +62,7 @@ import { LoginType } from "@/types/main";
 const emit = defineEmits<{
   saveLogin: [any, LoginType];
 }>();
+const { isSmallScreen } = useMobile();
 
 // 表单类型
 interface PhoneFormType {
@@ -205,11 +216,34 @@ onMounted(() => {
 .login-phone {
   .phone-form {
     margin-top: 20px;
+    .captcha-row {
+      display: flex;
+      width: 100%;
+      .captcha-input {
+        flex: 1;
+        min-width: 0;
+      }
+    }
     .send {
       margin-left: 12px;
+      flex-shrink: 0;
+      white-space: nowrap;
     }
     .login {
       width: 100%;
+    }
+  }
+  @media (max-width: 768px) {
+    .phone-form {
+      margin-top: 12px;
+      .captcha-row {
+        flex-direction: column;
+        gap: 12px;
+      }
+      .send {
+        width: 100%;
+        margin-left: 0;
+      }
     }
   }
 }

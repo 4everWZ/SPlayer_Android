@@ -171,8 +171,21 @@
               <!-- 自定义按钮插槽 -->
               <slot name="action-buttons" :detail-data="detailData" />
               <!-- 更多操作 -->
+              <n-button
+                v-if="isSmallScreen && visibleMoreOptions.length"
+                :focusable="false"
+                class="more"
+                circle
+                strong
+                secondary
+                @click="showMoreDrawer = true"
+              >
+                <template #icon>
+                  <SvgIcon name="List" />
+                </template>
+              </n-button>
               <n-dropdown
-                v-if="moreOptions?.length"
+                v-else-if="moreOptions?.length"
                 :options="moreOptions"
                 trigger="click"
                 placement="bottom-start"
@@ -216,11 +229,7 @@
                 </n-tab>
                 <n-tab name="comments">
                   评论
-                  <n-text
-                    v-if="detailData?.commentCount"
-                    class="count"
-                    depth="3"
-                  >
+                  <n-text v-if="detailData?.commentCount" class="count" depth="3">
                     {{ formatCommentCount(detailData.commentCount) }}
                   </n-text>
                 </n-tab>
@@ -236,6 +245,31 @@
         </div>
       </div>
     </Transition>
+    <n-drawer
+      v-model:show="showMoreDrawer"
+      placement="bottom"
+      class="mobile-action-drawer"
+      height="auto"
+    >
+      <n-drawer-content
+        title="更多操作"
+        :native-scrollbar="false"
+        :body-content-style="{ padding: '0 16px calc(env(safe-area-inset-bottom) + 16px)' }"
+      >
+        <n-flex vertical size="small" class="mobile-action-list">
+          <n-button
+            v-for="item in visibleMoreOptions"
+            :key="String(item.key)"
+            block
+            strong
+            secondary
+            @click="handleMoreOptionClick(item)"
+          >
+            {{ getMoreOptionLabel(item) }}
+          </n-button>
+        </n-flex>
+      </n-drawer-content>
+    </n-drawer>
   </div>
 </template>
 
@@ -247,6 +281,7 @@ import { removeBrackets, formatCommentCount } from "@/utils/format";
 import { renderToolbar } from "@/utils/meta";
 import { formatTimestamp } from "@/utils/time";
 import { openDescModal, openJumpArtist } from "@/utils/modal";
+import { useMobile } from "@/composables/useMobile";
 import { useSettingStore } from "@/stores";
 
 interface ListDetailConfig {
@@ -292,9 +327,15 @@ const emit = defineEmits<{
 
 const router = useRouter();
 const settingStore = useSettingStore();
+const { isSmallScreen } = useMobile();
 
 // 当前 tab
 const currentTab = ref<"songs" | "comments">("songs");
+const showMoreDrawer = ref(false);
+
+const visibleMoreOptions = computed(() =>
+  props.moreOptions.filter((item) => item.type !== "divider" && item.show !== false),
+);
 
 // 切换资源时重置 tab
 watch(
@@ -342,6 +383,18 @@ const handleDescriptionClick = () => {
 const handleTabChange = (value: "songs" | "comments") => {
   currentTab.value = value;
   emit("tab-change", value);
+};
+
+const getMoreOptionLabel = (option: DropdownOption) => {
+  return typeof option.label === "string" ? option.label : String(option.key || "");
+};
+
+const handleMoreOptionClick = (option: DropdownOption) => {
+  const onClick = option.props?.onClick;
+  if (typeof onClick === "function") {
+    (onClick as () => void)();
+  }
+  showMoreDrawer.value = false;
 };
 </script>
 
@@ -513,6 +566,7 @@ const handleTabChange = (value: "songs" | "comments") => {
         left: 0;
         bottom: 0;
         width: 100%;
+        gap: 12px;
         :deep(.n-button) {
           height: 40px;
           transition: all 0.3s var(--n-bezier);
@@ -545,11 +599,6 @@ const handleTabChange = (value: "songs" | "comments") => {
           }
         }
       }
-      @media (max-width: 1200px) {
-        .right {
-          display: none !important;
-        }
-      }
       @media (max-width: 768px) {
         .hidden {
           display: none !important;
@@ -562,7 +611,7 @@ const handleTabChange = (value: "songs" | "comments") => {
         margin-right: 12px;
       }
       .data {
-        padding-right: 20px;
+        padding-right: 0;
         .name {
           font-size: 22px;
           margin-bottom: 8px;
@@ -571,11 +620,36 @@ const handleTabChange = (value: "songs" | "comments") => {
           top: 42px;
         }
         .menu {
+          position: static;
+          margin-top: auto;
+          flex-wrap: wrap;
+          align-items: stretch;
           :deep(.n-button) {
             height: 34px;
             --n-font-size: 13px;
             --n-padding: 0 14px;
             --n-icon-size: 16px;
+          }
+          .left,
+          .right {
+            width: 100%;
+          }
+          .left {
+            flex-wrap: wrap;
+            gap: 8px !important;
+          }
+          .right {
+            justify-content: space-between;
+            gap: 8px !important;
+          }
+          .search {
+            flex: 1;
+            width: auto;
+            min-width: 0;
+          }
+          .tabs {
+            width: auto;
+            min-width: 168px;
           }
         }
       }
@@ -609,6 +683,12 @@ const handleTabChange = (value: "songs" | "comments") => {
         }
       }
     }
+  }
+}
+
+.mobile-action-list {
+  .n-button {
+    justify-content: flex-start;
   }
 }
 </style>

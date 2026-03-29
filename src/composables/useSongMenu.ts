@@ -9,7 +9,7 @@ import {
 } from "@/stores";
 import { useDownloadManager } from "@/core/resource/DownloadManager";
 import { usePlayerController } from "@/core/player/PlayerController";
-import { renderIcon, copyData, getShareUrl } from "@/utils/helper";
+import { renderIcon, copyData, shareResource } from "@/utils/helper";
 import { deleteCloudSong, importCloudSong } from "@/api/cloud";
 import {
   openCloudMatch,
@@ -287,7 +287,12 @@ export const useSongMenu = () => {
             label: `分享${type === "song" ? "歌曲" : "节目"}链接`,
             show: !isLocal && type !== "streaming",
             props: {
-              onClick: () => copyData(getShareUrl(type, song.id), "已复制分享链接到剪贴板"),
+              onClick: () =>
+                shareResource(type, song.id, {
+                  title: song.name,
+                  text: song.name,
+                  dialogTitle: `分享${type === "song" ? "歌曲" : "节目"}`,
+                }),
             },
             icon: renderIcon("Share", { size: 18 }),
           },
