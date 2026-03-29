@@ -17,15 +17,45 @@ type ShareContentOptions = {
 };
 
 /**
+ * 降级复制文本
+ */
+const copyShareFallback = async (content: string): Promise<boolean> => {
+  if (!content) return false;
+  if (navigator.clipboard && window.isSecureContext) {
+    try {
+      await navigator.clipboard.writeText(content);
+      window.$message?.success("链接已复制到剪贴板");
+      return true;
+    } catch (error) {
+      console.error("clipboard.writeText 失败，尝试降级方案", error);
+    }
+  }
+  try {
+    const textarea = document.createElement("textarea");
+    textarea.value = content;
+    textarea.style.position = "fixed";
+    textarea.style.top = "-9999px";
+    textarea.style.left = "-9999px";
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+    const success = document.execCommand("copy");
+    document.body.removeChild(textarea);
+    if (!success) throw new Error("execCommand 返回 false");
+    window.$message?.success("链接已复制到剪贴板");
+    return true;
+  } catch (error) {
+    console.error("复制分享链接失败：", error);
+    return false;
+  }
+};
+
+/**
  * 统一分享能力
  * Capacitor 原生环境使用系统分享面板，Web 降级到 navigator.share，都不支持则复制到剪贴板
  */
-export const shareContent = async (options: {
-  title?: string;
-  text?: string;
-  url?: string;
-  dialogTitle?: string;
-}): Promise<boolean> => {
+export const shareContent = async (options: ShareContentOptions): Promise<boolean> => {
+  const fallbackContent = options.url || options.text || "";
   try {
     if (isCapacitor) {
       const { Share } = await import("@capacitor/share");
@@ -41,11 +71,7 @@ export const shareContent = async (options: {
       });
       return true;
     }
-    // 最终降级：复制到剪贴板
-    const content = options.url || options.text || "";
-    if (content && navigator.clipboard && window.isSecureContext) {
-      await navigator.clipboard.writeText(content);
-      window.$message?.success("链接已复制到剪贴板");
+    if (await copyShareFallback(fallbackContent)) {
       return true;
     }
     window.$message?.warning("当前环境不支持分享");
@@ -54,6 +80,9 @@ export const shareContent = async (options: {
     // 用户取消不算错误
     if (error?.name === "AbortError") return false;
     console.error("分享失败：", error);
+    if (await copyShareFallback(fallbackContent)) {
+      return true;
+    }
     return false;
   }
 };

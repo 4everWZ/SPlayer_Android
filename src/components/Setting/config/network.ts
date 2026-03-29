@@ -162,7 +162,8 @@ export const useNetworkSettings = (): SettingConfig => {
           }
         }
         const checkAuth = setInterval(async () => {
-          if (authWindow?.closed) {
+          if (!isCapacitor && authWindow?.closed) {
+            clearTimeout(authTimeout);
             clearInterval(checkAuth);
             if (lastfmAuthLoading.value) {
               lastfmAuthLoading.value = false;
@@ -174,6 +175,7 @@ export const useNetworkSettings = (): SettingConfig => {
             const sessionResponse = await getSession(token);
             if (sessionResponse.session) {
               clearInterval(checkAuth);
+              clearTimeout(authTimeout);
               authWindow?.close();
               settingStore.lastfm.sessionKey = sessionResponse.session.key;
               settingStore.lastfm.username = sessionResponse.session.name;
@@ -185,7 +187,7 @@ export const useNetworkSettings = (): SettingConfig => {
           }
         }, 2000);
 
-        setTimeout(() => {
+        const authTimeout = setTimeout(() => {
           clearInterval(checkAuth);
           if (lastfmAuthLoading.value) {
             lastfmAuthLoading.value = false;
@@ -558,3 +560,4 @@ export const useNetworkSettings = (): SettingConfig => {
     ],
   };
 };
+
