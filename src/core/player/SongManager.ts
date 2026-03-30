@@ -50,6 +50,52 @@ export type AudioSource = {
 class SongManager {
   /** 预载下一首歌曲播放信息 */
   private nextPrefetch: AudioSource | undefined;
+  /** 当前歌曲已失败的音源 */
+  private failedSources = new Map<number, Set<AudioSourceType>>();
+
+  private getFailedSourceSet(songId: number): Set<AudioSourceType> {
+    let failedSources = this.failedSources.get(songId);
+    if (!failedSources) {
+      failedSources = new Set<AudioSourceType>();
+      this.failedSources.set(songId, failedSources);
+    }
+    return failedSources;
+  }
+
+  private hasFailedSource(songId: number, source: AudioSourceType): boolean {
+    return this.failedSources.get(songId)?.has(source) ?? false;
+  }
+
+  public markSourceFailed(songId: number | string, source?: AudioSourceType) {
+    const normalizedSongId = Number(songId);
+    if (!Number.isFinite(normalizedSongId) || normalizedSongId <= 0) return;
+    if (!source || source === "local" || source === "streaming") return;
+    this.getFailedSourceSet(normalizedSongId).add(source);
+  }
+
+  public clearSourceFailures(songId?: number | string) {
+    if (songId == null) {
+      this.failedSources.clear();
+      return;
+    }
+    const normalizedSongId = Number(songId);
+    if (!Number.isFinite(normalizedSongId) || normalizedSongId <= 0) return;
+    this.failedSources.delete(normalizedSongId);
+  }
+
+  public getRetryLimit(song: SongType): number {
+    const settingStore = useSettingStore();
+    const canUnlock =
+      song.type !== "radio" &&
+      song.type !== "streaming" &&
+      !song.path &&
+      settingStore.useSongUnlock;
+    const enabledUnlockCount = canUnlock
+      ? settingStore.songUnlockServer.filter((server) => server.enabled).length
+      : 0;
+    const totalSourceCount = 1 + enabledUnlockCount;
+    return Math.max(1, totalSourceCount - 1);
+  }
 
   public peekPrefetch(id: number): AudioSource | undefined {
     if (!this.nextPrefetch) return;
@@ -301,7 +347,7 @@ class SongManager {
       servers = [specificSource as SongUnlockServer];
     } else {
       servers = settingStore.songUnlockServer
-        .filter((s) => s.enabled)
+        .filter((s) => s.enabled && !this.hasFailedSource(songId, s.key as AudioSourceType))
         .map((s) => s.key as SongUnlockServer);
     }
 
@@ -552,11 +598,21 @@ class SongManager {
 
       // 如果指定了官方源，或未指定 (默认优先官方)
       // 尝试获取官方链接
-      const { url: officialUrl, isTrial, quality } = await this.getOnlineUrl(songId, !!song.pc);
-      // 如果官方链接有效且非试听（或者用户接受试听）
-      if (officialUrl && (!isTrial || (isTrial && settingStore.playSongDemo))) {
-        if (isTrial) window.$message.warning("当前歌曲仅可试听");
-        return { id: songId, url: officialUrl, quality, isUnlocked: false, source: "official" };
+      const shouldTryOfficial =
+        forceSource === "official" || !this.hasFailedSource(songId, "official");
+      if (shouldTryOfficial) {
+        const { url: officialUrl, isTrial, quality } = await this.getOnlineUrl(songId, !!song.pc);
+        // 如果官方链接有效且非试听（或者用户接受试听）
+        if (officialUrl && (!isTrial || (isTrial && settingStore.playSongDemo))) {
+          if (isTrial) window.$message.warning("当前歌曲仅可试听");
+          return {
+            id: songId,
+            url: officialUrl,
+            quality,
+            isUnlocked: false,
+            source: "official",
+          };
+        }
       }
       // 如果官方失败（或被跳过），且未强制指定 auto (或者指定了 auto 但允许回退 - 即 Auto 模式)
       if ((!forceSource || forceSource === "auto") && canUnlock) {

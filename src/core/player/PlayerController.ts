@@ -30,8 +30,6 @@ import { useSongManager } from "./SongManager";
 class PlayerController {
   /** 自动关闭定时器 */
   private autoCloseInterval: ReturnType<typeof setInterval> | undefined;
-  /** 最大重试次数 */
-  private readonly MAX_RETRY_COUNT = 3;
   /** 当前曲目重试信息（按歌曲维度） */
   private retryInfo: { songId: number | string; count: number } = { songId: 0, count: 0 };
   /** 当前播放请求标识 */
@@ -192,6 +190,7 @@ class PlayerController {
     const musicStore = useMusicStore();
     const statusStore = useStatusStore();
     const lyricManager = useLyricManager();
+    const songManager = useSongManager();
 
     musicStore.playSong = song;
     statusStore.currentTime = startSeek;
@@ -201,6 +200,12 @@ class PlayerController {
     // 重置重试计数
     const sid = song.type === "radio" ? song.dj?.id : song.id;
     if (this.retryInfo.songId !== sid) {
+      if (this.retryInfo.songId) {
+        songManager.clearSourceFailures(this.retryInfo.songId);
+      }
+      if (sid) {
+        songManager.clearSourceFailures(sid);
+      }
       this.retryInfo = { songId: sid || 0, count: 0 };
     }
     statusStore.lyricLoading = true;
@@ -333,7 +338,9 @@ class PlayerController {
     } catch (error) {
       if (requestToken === this.currentRequestToken) {
         console.error("❌ 播放初始化失败:", error);
-        this.handlePlaybackError(undefined);
+        const failedSource = (this.currentAudioSource as { source?: AudioSourceType } | null)
+          ?.source;
+        this.handlePlaybackError(undefined, 0, failedSource);
       }
     }
   }
@@ -692,7 +699,16 @@ class PlayerController {
       mediaSessionManager.updatePlaybackStatus(true);
       window.document.title = `${playTitle} | SPlayer`;
       // 只有真正播放了才重置重试计数
-      if (this.retryInfo.count > 0) this.retryInfo.count = 0;
+      if (this.retryInfo.count > 0) {
+        this.retryInfo.count = 0;
+        const currentSongId =
+          musicStore.playSong?.type === "radio"
+            ? (musicStore.playSong.dj?.id ?? 0)
+            : (musicStore.playSong?.id ?? 0);
+        if (currentSongId) {
+          useSongManager().clearSourceFailures(currentSongId);
+        }
+      }
       // 注意：failSkipCount 的重置移至 onTimeUpdate，确保有实际进度
       // Last.fm Scrobbler
       lastfmScrobbler.resume();
@@ -802,7 +818,7 @@ class PlayerController {
     // 错误处理
     audioManager.addEventListener("error", (e) => {
       const errCode = e.detail.errorCode;
-      this.handlePlaybackError(errCode, this.getSeek());
+      this.handlePlaybackError(errCode, this.getSeek(), this.currentAudioSource?.source);
     });
   }
 
@@ -810,8 +826,13 @@ class PlayerController {
    * 统一错误处理策略
    * @param errCode 错误码
    * @param currentSeek 当前播放位置 (用于恢复)
+   * @param failedSource 本次失败的音源
    */
-  private async handlePlaybackError(errCode: number | undefined, currentSeek: number = 0) {
+  private async handlePlaybackError(
+    errCode: number | undefined,
+    currentSeek: number = 0,
+    failedSource?: AudioSourceType,
+  ) {
     // 错误防抖
     const now = Date.now();
     if (now - this.lastErrorTime < 200) return;
@@ -822,25 +843,20 @@ class PlayerController {
     // 清除预加载缓存
     songManager.clearPrefetch();
     // 当前歌曲 ID
-    const currentSongId = musicStore.playSong?.id || 0;
+    const currentSongId =
+      musicStore.playSong?.type === "radio"
+        ? (musicStore.playSong.dj?.id ?? 0)
+        : (musicStore.playSong?.id ?? 0);
     // 检查是否为同一首歌
     if (this.retryInfo.songId !== currentSongId) {
       // 新歌曲，重置重试计数
       this.retryInfo = { songId: currentSongId, count: 0 };
     }
-    // 防止无限重试
-    const ABSOLUTE_MAX_RETRY = 3;
-    if (this.retryInfo.count >= ABSOLUTE_MAX_RETRY) {
-      console.error(`❌ 歌曲 ${currentSongId} 已重试 ${this.retryInfo.count} 次，强制跳过`);
-      window.$message.error("播放失败，已自动跳过");
-      statusStore.playLoading = false;
-      this.retryInfo.count = 0;
-      await this.skipToNextWithDelay();
-      return;
-    }
+    const retryLimit = songManager.getRetryLimit(musicStore.playSong);
     // 用户主动中止
     if (errCode === AudioErrorCode.ABORTED || errCode === AudioErrorCode.DOM_ABORT) {
       this.retryInfo.count = 0;
+      songManager.clearSourceFailures(currentSongId);
       return;
     }
     // 格式不支持
@@ -849,6 +865,7 @@ class PlayerController {
       window.$message.error("该歌曲无法播放，已自动跳过");
       statusStore.playLoading = false;
       this.retryInfo.count = 0;
+      songManager.clearSourceFailures(currentSongId);
       await this.skipToNextWithDelay();
       return;
     }
@@ -858,16 +875,16 @@ class PlayerController {
       window.$message.error("本地文件无法播放");
       statusStore.playLoading = false;
       this.retryInfo.count = 0;
+      songManager.clearSourceFailures(currentSongId);
       await this.skipToNextWithDelay();
       return;
     }
+    songManager.markSourceFailed(currentSongId, failedSource);
     // 在线/流媒体错误处理
     this.retryInfo.count++;
-    console.warn(
-      `⚠️ 播放出错 (Code: ${errCode}), 重试: ${this.retryInfo.count}/${this.MAX_RETRY_COUNT}`,
-    );
+    console.warn(`⚠️ 播放出错 (Code: ${errCode}), 重试: ${this.retryInfo.count}/${retryLimit}`);
     // 未超过重试次数 -> 尝试重新获取 URL（可能是过期）
-    if (this.retryInfo.count <= this.MAX_RETRY_COUNT) {
+    if (this.retryInfo.count <= retryLimit) {
       await sleep(1000);
       if (this.retryInfo.count === 1) {
         statusStore.playLoading = true;
@@ -879,6 +896,7 @@ class PlayerController {
     // 超过重试次数 -> 跳下一首
     console.error("❌ 超过最大重试次数，跳过当前歌曲");
     this.retryInfo.count = 0;
+    songManager.clearSourceFailures(currentSongId);
     window.$message.error("播放失败，已自动跳过");
     await this.skipToNextWithDelay();
   }
@@ -1221,10 +1239,12 @@ class PlayerController {
     const statusStore = useStatusStore();
     const musicStore = useMusicStore();
     const audioManager = useAudioManager();
+    const songManager = useSongManager();
     // 重置状态
     audioManager.stop();
     statusStore.resetPlayStatus();
     musicStore.resetMusicData();
+    songManager.clearSourceFailures();
     // 清空播放列表
     await dataStore.setPlayList([]);
     await dataStore.clearOriginalPlayList();
