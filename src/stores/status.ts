@@ -19,6 +19,12 @@ interface StatusState {
   searchFocus: boolean;
   /** 搜索框输入值 */
   searchInputValue: string;
+  /** 网络退化状态 */
+  networkDegraded: boolean;
+  /** 连续网络失败次数 */
+  networkFailureCount: number;
+  /** 上次返回键按下时间 */
+  lastBackPressAt: number;
   /** 背景图 URL (Blob URL) */
   backgroundImageUrl: string | null;
   /** 播放控制条 */
@@ -29,6 +35,12 @@ interface StatusState {
   playerMetaShow: boolean;
   /** 播放列表状态 */
   playListShow: boolean;
+  /** 底部歌曲操作面板 */
+  playerSongMenuOpen: boolean;
+  /** 底部更多控制面板 */
+  playerControlsDrawerOpen: boolean;
+  /** 播放模式面板 */
+  playerModePanelOpen: boolean;
   /** 播放状态 */
   playStatus: boolean;
   /** 播放加载状态 */
@@ -174,11 +186,17 @@ export const useStatusStore = defineStore("status", {
     menuCollapsed: false,
     searchFocus: false,
     searchInputValue: "",
+    networkDegraded: false,
+    networkFailureCount: 0,
+    lastBackPressAt: 0,
     backgroundImageUrl: null,
     showPlayBar: true,
     playStatus: false,
     playLoading: true,
     playListShow: false,
+    playerSongMenuOpen: false,
+    playerControlsDrawerOpen: false,
+    playerModePanelOpen: false,
     showFullPlayer: false,
     playerMetaShow: true,
     currentTime: 0,
@@ -278,6 +296,21 @@ export const useStatusStore = defineStore("status", {
       }
       return "Repeat";
     },
+    /** 移动端模式面板当前主状态 */
+    playerModeKey(state) {
+      if (state.shuffleMode === "heartbeat") return "heartbeat";
+      if (state.shuffleMode === "on") return "shuffle";
+      if (state.repeatMode === "one") return "repeat-one";
+      if (state.repeatMode === "list") return "repeat-list";
+      return "repeat-off";
+    },
+    /** 移动端模式图标 */
+    playerModeIcon(state) {
+      if (state.shuffleMode === "heartbeat") return "HeartBit";
+      if (state.shuffleMode === "on") return "Shuffle";
+      if (state.repeatMode === "one") return "RepeatSong";
+      return "Repeat";
+    },
     /** 音量百分比 */
     playVolumePercent(state) {
       return Math.round(state.playVolume * 100);
@@ -308,6 +341,58 @@ export const useStatusStore = defineStore("status", {
     },
   },
   actions: {
+    markNetworkFailure() {
+      this.networkFailureCount += 1;
+      this.networkDegraded = this.networkFailureCount >= 2;
+    },
+    clearNetworkFailure() {
+      if (!this.networkFailureCount && !this.networkDegraded) return;
+      this.networkFailureCount = 0;
+      this.networkDegraded = false;
+    },
+    markBackPressed(timestamp: number = Date.now()) {
+      this.lastBackPressAt = timestamp;
+    },
+    resetBackPressed() {
+      this.lastBackPressAt = 0;
+    },
+    shouldMinimizeOnBack(timestamp: number = Date.now(), interval: number = 2000) {
+      return this.lastBackPressAt > 0 && timestamp - this.lastBackPressAt <= interval;
+    },
+    closeTopOverlay() {
+      if (this.searchFocus) {
+        this.searchFocus = false;
+        return true;
+      }
+      if (this.playerSongMenuOpen) {
+        this.playerSongMenuOpen = false;
+        return true;
+      }
+      if (this.playerControlsDrawerOpen) {
+        this.playerControlsDrawerOpen = false;
+        return true;
+      }
+      if (this.playerModePanelOpen) {
+        this.playerModePanelOpen = false;
+        return true;
+      }
+      if (this.playListShow) {
+        this.playListShow = false;
+        return true;
+      }
+      if (
+        typeof document !== "undefined" &&
+        document.querySelector(".n-modal-container .n-modal, .n-modal-container .n-dialog")
+      ) {
+        window.$modal?.destroyAll();
+        return true;
+      }
+      if (this.showFullPlayer) {
+        this.showFullPlayer = false;
+        return true;
+      }
+      return false;
+    },
     triggerAutomixFx() {
       this.automixFxSeq += 1;
     },
@@ -423,11 +508,12 @@ export const useStatusStore = defineStore("status", {
         playStatus: false,
         playLoading: false,
         playListShow: false,
+        playerSongMenuOpen: false,
+        playerControlsDrawerOpen: false,
+        playerModePanelOpen: false,
         showFullPlayer: false,
         personalFmMode: false,
         playIndex: -1,
-        repeatMode: "off",
-        shuffleMode: "off",
         listSortField: "default",
         listSortOrder: "default",
       });

@@ -171,7 +171,7 @@
         <n-drawer-content
           title="列表排序"
           :native-scrollbar="false"
-          :body-content-style="{ padding: '0 16px calc(env(safe-area-inset-bottom) + 16px)' }"
+          :body-content-style="{ padding: '0 16px calc(var(--safe-area-inset-bottom) + 16px)' }"
         >
           <div class="sort-menu mobile">
             <div class="group">

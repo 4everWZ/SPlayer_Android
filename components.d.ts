@@ -144,6 +144,7 @@ declare module 'vue' {
     PlayerData: typeof import('./src/components/Player/PlayerMeta/PlayerData.vue')['default']
     PlayerLyric: typeof import('./src/components/Player/PlayerLyric/index.vue')['default']
     PlayerMenu: typeof import('./src/components/Player/PlayerMenu.vue')['default']
+    PlayerModePanel: typeof import('./src/components/Player/PlayerModePanel.vue')['default']
     PlayerProvider: typeof import('./src/components/Global/PlayerProvider.vue')['default']
     PlayerRightMenu: typeof import('./src/components/Player/PlayerRightMenu.vue')['default']
     PlayerSlider: typeof import('./src/components/Player/PlayerComponents/PlayerSlider.vue')['default']

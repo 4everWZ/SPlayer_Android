@@ -6,9 +6,13 @@ import { TASKBAR_IPC_CHANNELS } from "@/types/shared";
 import { isElectron, isMac } from "@/utils/env";
 import { printVersion } from "@/utils/log";
 import { openUserAgreement } from "@/utils/modal";
+import {
+  initAndroidBackButton,
+  disposeAndroidBackButton,
+} from "@/composables/useAndroidBackButton";
 import { useEventListener } from "@vueuse/core";
 import { debounce } from "lodash-es";
-import { onMounted, watch } from "vue";
+import { onBeforeUnmount, onMounted, watch } from "vue";
 
 /** 最终聚焦主窗口的延迟时间（毫秒） */
 const FINAL_FOCUS_DELAY_MS = 500;
@@ -30,6 +34,8 @@ export const useInit = () => {
   initEventListener();
 
   onMounted(async () => {
+    // 尽早接管 Android 返回键
+    await initAndroidBackButton();
     // 检查并执行设置迁移
     settingStore.checkAndMigrate();
     // 打印版本信息
@@ -102,6 +108,10 @@ export const useInit = () => {
         }, FINAL_FOCUS_DELAY_MS);
       }
     }
+  });
+
+  onBeforeUnmount(() => {
+    void disposeAndroidBackButton();
   });
 };
 

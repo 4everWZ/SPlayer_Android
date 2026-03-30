@@ -13,6 +13,11 @@ export type RepeatModeType = "off" | "list" | "one";
 export type ShuffleModeType = "off" | "on" | "heartbeat";
 
 /**
+ * 播放模式
+ */
+export type PlayerModeKey = "repeat-off" | "repeat-list" | "repeat-one" | "shuffle" | "heartbeat";
+
+/**
  * 用于 "play-mode-change" 事件的负载结构
  */
 export interface PlayModePayload {

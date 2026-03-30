@@ -2,7 +2,7 @@ import { toRaw } from "vue";
 import { AudioErrorCode } from "@/core/audio-player/BaseAudioPlayer";
 import { useDataStore, useMusicStore, useSettingStore, useStatusStore } from "@/stores";
 import type { AudioSourceType, QualityType, SongType } from "@/types/main";
-import type { RepeatModeType, ShuffleModeType } from "@/types/shared/play-mode";
+import type { PlayerModeKey, RepeatModeType, ShuffleModeType } from "@/types/shared/play-mode";
 import { type AudioAnalysis } from "@/types/audio/automix";
 import { calculateLyricIndex } from "@/utils/calc";
 import { getCoverColor } from "@/utils/color";
@@ -1440,8 +1440,8 @@ class PlayerController {
    * 切换循环模式
    * @param mode 可选，直接设置目标模式。如果不传，则按 List -> One -> Off 顺序轮转
    */
-  public toggleRepeat(mode?: RepeatModeType) {
-    this.playModeManager.toggleRepeat(mode);
+  public toggleRepeat(mode?: RepeatModeType, options?: { notify?: boolean }) {
+    this.playModeManager.toggleRepeat(mode, options);
   }
 
   /**
@@ -1450,15 +1450,84 @@ class PlayerController {
    * @note 心跳模式只能通过菜单开启（传入 "heartbeat" 参数），点击随机按钮不会进入心跳模式
    * @note 当播放列表包含本地歌曲时，跳过心动模式，只在 Off 和 On 之间切换
    */
-  public async toggleShuffle(mode?: ShuffleModeType) {
+  public async toggleShuffle(mode?: ShuffleModeType, options?: { notify?: boolean }) {
     const statusStore = useStatusStore();
     const currentMode = statusStore.shuffleMode;
     // 预判下一个模式
     const nextMode = mode ?? this.playModeManager.calculateNextShuffleMode(currentMode);
     // 如果模式确实改变了，才让 Manager 进行繁重的数据处理
     if (currentMode !== nextMode) {
-      await this.playModeManager.toggleShuffle(nextMode);
+      await this.playModeManager.toggleShuffle(nextMode, options);
     }
+  }
+
+  /**
+   * 设置播放模式
+   */
+  public async setPlayMode(mode: PlayerModeKey) {
+    const musicStore = useMusicStore();
+    const statusStore = useStatusStore();
+    const canUseHeartbeat =
+      !statusStore.personalFmMode &&
+      musicStore.playSong.type !== "radio" &&
+      !musicStore.playSong.path;
+
+    if (mode === "heartbeat" && !canUseHeartbeat) return;
+    if (statusStore.playerModeKey === mode) return;
+
+    switch (mode) {
+      case "repeat-off":
+        if (statusStore.shuffleMode !== "off") {
+          await this.toggleShuffle("off", { notify: false });
+        }
+        this.toggleRepeat("off");
+        break;
+      case "repeat-list":
+        if (statusStore.shuffleMode !== "off") {
+          await this.toggleShuffle("off", { notify: false });
+        }
+        this.toggleRepeat("list");
+        break;
+      case "repeat-one":
+        if (statusStore.shuffleMode !== "off") {
+          await this.toggleShuffle("off", { notify: false });
+        }
+        this.toggleRepeat("one");
+        break;
+      case "shuffle":
+        if (statusStore.repeatMode !== "list") {
+          this.toggleRepeat("list", { notify: false });
+        }
+        await this.toggleShuffle("on");
+        break;
+      case "heartbeat":
+        if (statusStore.repeatMode !== "list") {
+          this.toggleRepeat("list", { notify: false });
+        }
+        await this.toggleShuffle("heartbeat");
+        break;
+    }
+  }
+
+  /**
+   * 轮转播放模式
+   */
+  public async cyclePlayMode() {
+    const musicStore = useMusicStore();
+    const statusStore = useStatusStore();
+    const modes: PlayerModeKey[] = ["repeat-off", "repeat-list", "repeat-one", "shuffle"];
+
+    if (
+      !statusStore.personalFmMode &&
+      musicStore.playSong.type !== "radio" &&
+      !musicStore.playSong.path
+    ) {
+      modes.push("heartbeat");
+    }
+
+    const currentIndex = modes.indexOf(statusStore.playerModeKey as PlayerModeKey);
+    const nextMode = modes[(currentIndex + 1 + modes.length) % modes.length];
+    await this.setPlayMode(nextMode);
   }
 
   /**

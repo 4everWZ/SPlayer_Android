@@ -144,7 +144,7 @@ onMounted(() => {
     transition-delay: 0.25s;
   }
   :deep(.scrollbar) {
-    max-height: calc(100dvh - 160px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    max-height: calc(100dvh - 160px - var(--safe-area-inset-top) - var(--safe-area-inset-bottom));
     .n-scrollbar-content {
       padding: 10px;
     }

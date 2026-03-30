@@ -2,8 +2,10 @@ import { useMusicStore, useSettingStore, useStatusStore } from "@/stores";
 import { isElectron } from "@/utils/env";
 import { getPlaySongData } from "@/utils/format";
 import { msToS } from "@/utils/time";
+import type { PluginListenerHandle } from "@capacitor/core";
 import type { SystemMediaEvent } from "@emi";
 import { throttle } from "lodash-es";
+import { androidMediaBridge } from "./AndroidMediaBridge";
 import { usePlayerController } from "./PlayerController";
 import {
   enableDiscordRpc,
@@ -23,6 +25,7 @@ import {
 class MediaSessionManager {
   private metadataAbortController: AbortController | null = null;
   private currentRate: number = 1;
+  private nativeMediaListener: PluginListenerHandle | null = null;
 
   private throttledSendTimeline = throttle((currentTime: number, duration: number) => {
     sendMediaTimeline(currentTime, duration);
@@ -32,7 +35,7 @@ class MediaSessionManager {
    * 是否使用原生媒体集成
    */
   private shouldUseNativeMedia(): boolean {
-    return isElectron;
+    return isElectron || androidMediaBridge.isSupported;
   }
 
   /**
@@ -85,6 +88,14 @@ class MediaSessionManager {
     }
   }
 
+  private async bindAndroidMediaListener(player: ReturnType<typeof usePlayerController>) {
+    await this.nativeMediaListener?.remove();
+    await androidMediaBridge.removeAllListeners();
+    this.nativeMediaListener = await androidMediaBridge.addMediaEventListener((event) => {
+      this.handleMediaEvent(event, player);
+    });
+  }
+
   /**
    * 初始化媒体会话
    */
@@ -130,6 +141,23 @@ class MediaSessionManager {
       if (settingStore.smtcOpen) return;
     }
 
+    if (androidMediaBridge.isSupported) {
+      void this.bindAndroidMediaListener(player);
+      void androidMediaBridge.ensureNotificationPermission();
+      sendMediaPlayMode(
+        statusStore.shuffleMode !== "off",
+        statusStore.repeatMode === "list"
+          ? "List"
+          : statusStore.repeatMode === "one"
+            ? "Track"
+            : "None",
+      );
+      sendMediaPlaybackRate(statusStore.playRate);
+      sendMediaVolume(statusStore.playVolume);
+      sendMediaPlayState(statusStore.playStatus ? "Playing" : "Paused");
+      return;
+    }
+
     // Web API 初始化
     if ("mediaSession" in navigator) {
       const nav = navigator.mediaSession;
@@ -147,7 +175,7 @@ class MediaSessionManager {
    * 更新元数据
    */
   public async updateMetadata() {
-    if (!("mediaSession" in navigator) && !isElectron) return;
+    if (!("mediaSession" in navigator) && !this.shouldUseNativeMedia()) return;
     const musicStore = useMusicStore();
     const settingStore = useSettingStore();
     const song = getPlaySongData();

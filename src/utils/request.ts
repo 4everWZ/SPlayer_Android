@@ -1,9 +1,34 @@
-import axios, { AxiosInstance, AxiosRequestConfig, AxiosError, AxiosResponse } from "axios";
+import axios, {
+  AxiosInstance,
+  AxiosRequestConfig,
+  AxiosError,
+  AxiosResponse,
+  InternalAxiosRequestConfig,
+} from "axios";
 import { isDev } from "./env";
-import { useSettingStore } from "@/stores";
+import { useSettingStore, useStatusStore } from "@/stores";
 import { getCookie } from "./cookie";
 import { isLogin } from "./auth";
 import axiosRetry from "axios-retry";
+import { isCapacitor } from "./platform";
+
+type RequestMeta = {
+  silent?: boolean;
+  userAction?: boolean;
+  dedupeKey?: string;
+  errorMessage?: string;
+};
+
+export type AppRequestConfig = AxiosRequestConfig & {
+  meta?: RequestMeta;
+};
+
+type AppRequestInternalConfig = InternalAxiosRequestConfig & {
+  meta?: RequestMeta;
+};
+
+const NETWORK_ERROR_COOLDOWN_MS = 6000;
+const networkErrorCache = new Map<string, number>();
 
 // 全局地址
 const baseURL: string = String(isDev ? "/api/netease" : import.meta.env["VITE_API_URL"]);
@@ -11,8 +36,8 @@ const baseURL: string = String(isDev ? "/api/netease" : import.meta.env["VITE_AP
 // 基础配置
 const server: AxiosInstance = axios.create({
   baseURL,
-  // 允许跨域
-  withCredentials: true,
+  // 原生壳使用手动写入的 Cookie，避免因自建 API 的 CORS 头导致请求被拦截
+  withCredentials: !isCapacitor,
   // 超时时间
   timeout: 15000,
 });
@@ -23,11 +48,41 @@ axiosRetry(server, {
   retries: 3,
 });
 
+const resolveRequestMeta = (config?: Partial<AppRequestConfig>): Required<RequestMeta> => {
+  const method = String(config?.method || "get").toLowerCase();
+  const userAction = config?.meta?.userAction ?? !["get", "head", "options"].includes(method);
+  return {
+    silent: config?.meta?.silent ?? !userAction,
+    userAction,
+    dedupeKey: config?.meta?.dedupeKey ?? `${method}:${config?.url || baseURL}`,
+    errorMessage: config?.meta?.errorMessage ?? "网络请求超时，请检查网络连接",
+  };
+};
+
+const isNetworkError = (error: AxiosError) => {
+  const message = error.message?.toLowerCase?.() || "";
+  return (
+    error.code === "ECONNABORTED" ||
+    message.includes("timeout") ||
+    message.includes("network error") ||
+    message.includes("failed to fetch")
+  );
+};
+
+const notifyNetworkError = (message: string, dedupeKey: string) => {
+  const now = Date.now();
+  const lastShownAt = networkErrorCache.get(dedupeKey) || 0;
+  if (now - lastShownAt < NETWORK_ERROR_COOLDOWN_MS) return;
+  networkErrorCache.set(dedupeKey, now);
+  window.$message?.warning(message);
+};
+
 // 请求拦截器
 server.interceptors.request.use(
-  (request) => {
+  (request: AppRequestInternalConfig) => {
     // pinia
     const settingStore = useSettingStore();
+    request.meta = resolveRequestMeta(request);
     if (!request.params) request.params = {};
     // Cookie
     if (!request.params.noCookie && (isLogin() || getCookie("MUSIC_U") !== null)) {
@@ -61,15 +116,21 @@ server.interceptors.request.use(
 
 // 响应拦截器
 server.interceptors.response.use(
-  (response: AxiosResponse) => response,
+  (response: AxiosResponse) => {
+    useStatusStore().clearNetworkFailure();
+    return response;
+  },
   (error: AxiosError) => {
+    const statusStore = useStatusStore();
+    const request = error.config as AppRequestConfig | undefined;
+    const meta = resolveRequestMeta(request);
+
     // 超时/网络错误
-    if (
-      error.code === "ECONNABORTED" ||
-      error.message.includes("timeout") ||
-      error.message.includes("Network Error")
-    ) {
-      window.$message?.warning("网络请求超时，请检查网络连接");
+    if (isNetworkError(error)) {
+      statusStore.markNetworkFailure();
+      if (!meta.silent) {
+        notifyNetworkError(meta.errorMessage, meta.dedupeKey);
+      }
       // 返回 null 而非 reject，业务代码需要检查返回值
       return Promise.resolve({ data: null });
     }
@@ -101,7 +162,7 @@ server.interceptors.response.use(
 );
 
 // 请求
-const request = async <T = any>(config: AxiosRequestConfig): Promise<T> => {
+const request = async <T = any>(config: AppRequestConfig): Promise<T> => {
   // 返回请求数据
   const { data } = await server.request(config);
   return data as T;

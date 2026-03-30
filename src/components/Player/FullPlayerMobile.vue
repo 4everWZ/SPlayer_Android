@@ -17,8 +17,9 @@
       <!-- 歌曲信息页 -->
       <div class="page info-page">
         <!-- 封面 -->
-        <div class="cover-section">
+        <div :class="['cover-section', { clickable: hasLyric }]" @click.stop="openLyricPage">
           <PlayerCover :no-lyric="true" />
+          <div v-if="hasLyric" class="cover-tip">点击唱片查看歌词</div>
         </div>
 
         <!-- 歌曲信息区域 -->
@@ -64,14 +65,10 @@
 
           <!-- 主控制按钮 -->
           <div class="control-section">
-            <!-- 随机模式 -->
+            <!-- 播放模式 -->
             <template v-if="musicStore.playSong.type !== 'radio' && !statusStore.personalFmMode">
-              <div class="mode-btn" @click.stop="player.toggleShuffle()">
-                <SvgIcon
-                  :name="statusStore.shuffleIcon"
-                  :size="24"
-                  :depth="statusStore.shuffleMode === 'off' ? 3 : 1"
-                />
+              <div class="mode-btn" @click.stop="player.cyclePlayMode()">
+                <SvgIcon :name="statusStore.playerModeIcon" :size="24" />
               </div>
             </template>
             <div v-else class="placeholder"></div>
@@ -107,14 +104,10 @@
               <SvgIcon name="SkipNext" :size="36" />
             </div>
 
-            <!-- 循环模式 -->
-            <template v-if="musicStore.playSong.type !== 'radio' && !statusStore.personalFmMode">
-              <div class="mode-btn" @click.stop="player.toggleRepeat()">
-                <SvgIcon
-                  :name="statusStore.repeatIcon"
-                  :size="24"
-                  :depth="statusStore.repeatMode === 'off' ? 3 : 1"
-                />
+            <!-- 播放队列 -->
+            <template v-if="!statusStore.personalFmMode">
+              <div class="mode-btn queue-btn" @click.stop="statusStore.playListShow = true">
+                <SvgIcon name="PlayList" :size="24" />
               </div>
             </template>
             <div v-else class="placeholder"></div>
@@ -124,7 +117,7 @@
 
       <!-- 歌词页 -->
       <div class="page lyric-page">
-        <div class="lyric-header">
+        <div :class="['lyric-header', { clickable: hasLyric }]" @click.stop="openInfoPage">
           <s-image :src="musicStore.getSongCover('s')" class="lyric-cover" />
           <div class="lyric-info">
             <div class="name text-hidden">
@@ -200,10 +193,26 @@ const artistName = computed(() => {
   return (artists as string) || "未知艺术家";
 });
 
+const openLyricPage = () => {
+  if (!hasLyric.value) return;
+  pageIndex.value = 1;
+};
+
+const openInfoPage = () => {
+  pageIndex.value = 0;
+};
+
 // 没有歌词强制回到第一页
 watch(hasLyric, (val) => {
   if (!val) pageIndex.value = 0;
 });
+
+watch(
+  () => musicStore.playSong.id,
+  () => {
+    pageIndex.value = 0;
+  },
+);
 
 // 滑动偏移量
 const swipeOffset = ref(0);
@@ -259,12 +268,12 @@ const contentTransform = computed(() => {
   .top-bar {
     position: absolute;
     width: 100%;
-    height: calc(60px + env(safe-area-inset-top));
+    height: calc(60px + var(--safe-area-inset-top));
     flex-shrink: 0;
     display: flex;
     align-items: flex-end;
     justify-content: flex-end;
-    padding: env(safe-area-inset-top) 24px 0;
+    padding: var(--safe-area-inset-top) 24px 0;
     z-index: 10;
     .btn {
       width: 40px;
@@ -304,7 +313,7 @@ const contentTransform = computed(() => {
       display: flex;
       flex-direction: column;
       align-items: center;
-      padding: 0 24px calc(40px + env(safe-area-inset-bottom)) 24px;
+      padding: 0 24px calc(40px + var(--safe-area-inset-bottom)) 24px;
       overflow-y: auto;
       .cover-section {
         flex: 1;
@@ -312,8 +321,18 @@ const contentTransform = computed(() => {
         display: flex;
         align-items: center;
         justify-content: center;
-        margin-top: calc(60px + env(safe-area-inset-top));
+        flex-direction: column;
+        margin-top: calc(60px + var(--safe-area-inset-top));
         margin-bottom: 20px;
+        &.clickable {
+          cursor: pointer;
+        }
+        .cover-tip {
+          margin-top: 18px;
+          font-size: 13px;
+          opacity: 0.58;
+          color: rgb(var(--main-cover-color));
+        }
         :deep(.player-cover) {
           width: min(100%, 45vh);
           // height: min(85vw, 45vh);
@@ -467,7 +486,7 @@ const contentTransform = computed(() => {
     }
     .lyric-page {
       padding: 0 24px;
-      padding-top: calc(60px + env(safe-area-inset-top));
+      padding-top: calc(60px + var(--safe-area-inset-top));
       display: flex;
       flex-direction: column;
       .lyric-header {
@@ -477,6 +496,9 @@ const contentTransform = computed(() => {
         margin-bottom: 20px;
         flex-shrink: 0;
         padding: 10px 20px 0;
+        &.clickable {
+          cursor: pointer;
+        }
         .lyric-cover {
           width: 50px;
           height: 50px;
@@ -538,7 +560,7 @@ const contentTransform = computed(() => {
   }
   .pagination {
     position: absolute;
-    bottom: calc(24px + env(safe-area-inset-bottom));
+    bottom: calc(24px + var(--safe-area-inset-bottom));
     left: 0;
     width: 100%;
     display: flex;

@@ -228,8 +228,8 @@ onMounted(() => {
     background-color: rgba(var(--background));
   }
   #main-content {
-    top: calc(70px + env(safe-area-inset-top));
-    bottom: env(safe-area-inset-bottom);
+    top: calc(70px + var(--safe-area-inset-top));
+    bottom: var(--safe-area-inset-bottom);
     background-color: transparent;
     transition: bottom 0.3s;
     .router-view {
@@ -244,7 +244,7 @@ onMounted(() => {
   }
   &.show-player {
     #main-content {
-      bottom: calc(80px + env(safe-area-inset-bottom));
+      bottom: calc(80px + var(--safe-area-inset-bottom));
     }
   }
   &.show-full-player {

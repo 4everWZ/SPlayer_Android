@@ -546,7 +546,7 @@ onMounted(() => {
       .set-content {
         padding: 0 16px;
         .n-scrollbar-content {
-          padding: 12px 0 calc(env(safe-area-inset-bottom) + 20px) !important;
+          padding: 12px 0 calc(var(--safe-area-inset-bottom) + 20px) !important;
         }
       }
       .set-item {

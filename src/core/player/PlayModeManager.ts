@@ -11,6 +11,10 @@ import axios from "axios";
 import type { MessageReactive } from "naive-ui";
 import * as playerIpc from "./PlayerIpc";
 
+interface PlayModeChangeOptions {
+  notify?: boolean;
+}
+
 /**
  * 播放模式管理器
  * 负责循环模式、随机模式的切换逻辑及状态同步
@@ -40,8 +44,9 @@ export class PlayModeManager {
    * 切换循环模式
    * @param mode 可选，直接设置目标模式。如果不传，则按 List -> One -> Off 顺序轮转
    */
-  public toggleRepeat(mode?: RepeatModeType) {
+  public toggleRepeat(mode?: RepeatModeType, options: PlayModeChangeOptions = {}) {
     const statusStore = useStatusStore();
+    const notify = options.notify ?? true;
 
     if (mode) {
       if (statusStore.repeatMode === mode) return;
@@ -57,7 +62,9 @@ export class PlayModeManager {
       one: "单曲循环",
       off: "不循环",
     };
-    window.$message.success(modeText[statusStore.repeatMode], { showIcon: false });
+    if (notify) {
+      window.$message.success(modeText[statusStore.repeatMode], { showIcon: false });
+    }
   }
 
   /**
@@ -88,10 +95,11 @@ export class PlayModeManager {
   /**
    * 执行开启随机模式的操作
    */
-  private async applyShuffleOn(signal: AbortSignal) {
+  private async applyShuffleOn(signal: AbortSignal, options: PlayModeChangeOptions = {}) {
     const dataStore = useDataStore();
     const statusStore = useStatusStore();
     const musicStore = useMusicStore();
+    const notify = options.notify ?? true;
 
     const currentList = [...dataStore.playList];
     // 备份原始列表
@@ -107,16 +115,23 @@ export class PlayModeManager {
     const idx = shuffled.findIndex((s) => s.id === musicStore.playSong?.id);
     if (idx !== -1) statusStore.playIndex = idx;
 
-    window.$message.success("随机播放已开启", { showIcon: false });
+    if (notify) {
+      window.$message.success("随机播放已开启", { showIcon: false });
+    }
   }
 
   /**
    * 执行开启心动模式的操作
    */
-  private async applyHeartbeatMode(signal: AbortSignal, previousMode: ShuffleModeType) {
+  private async applyHeartbeatMode(
+    signal: AbortSignal,
+    previousMode: ShuffleModeType,
+    options: PlayModeChangeOptions = {},
+  ) {
     const statusStore = useStatusStore();
     const musicStore = useMusicStore();
     const dataStore = useDataStore();
+    const notify = options.notify ?? true;
 
     // 检查登录状态
     if (isLogin() !== 1) {
@@ -136,9 +151,11 @@ export class PlayModeManager {
       return;
     }
 
-    this.loadingMessage = window.$message.loading("心动模式开启中...", {
-      duration: 0,
-    });
+    if (notify) {
+      this.loadingMessage = window.$message.loading("心动模式开启中...", {
+        duration: 0,
+      });
+    }
 
     try {
       let pid = Number(musicStore.playPlaylistId);
@@ -196,7 +213,9 @@ export class PlayModeManager {
       await dataStore.setPlayList(finalList);
       // 设置播放索引为第一首
       statusStore.playIndex = 0;
-      window.$message.success("心动模式已开启");
+      if (notify) {
+        window.$message.success("心动模式已开启");
+      }
     } catch (e) {
       statusStore.shuffleMode = previousMode;
       throw e;
@@ -210,10 +229,11 @@ export class PlayModeManager {
    *
    * 会恢复原始列表 和/或 清理推荐歌曲
    */
-  private async applyShuffleOff() {
+  private async applyShuffleOff(options: PlayModeChangeOptions = {}) {
     const dataStore = useDataStore();
     const statusStore = useStatusStore();
     const musicStore = useMusicStore();
+    const notify = options.notify ?? true;
 
     // 恢复原始列表
     const original = await dataStore.getOriginalPlayList();
@@ -227,16 +247,19 @@ export class PlayModeManager {
       await dataStore.setPlayList(dataStore.playList);
     }
 
-    window.$message.success("随机播放已关闭", { showIcon: false });
+    if (notify) {
+      window.$message.success("随机播放已关闭", { showIcon: false });
+    }
   }
 
   /**
    * 切换随机模式
    * @param mode 要切换到的随机模式
    */
-  public async toggleShuffle(mode: ShuffleModeType) {
+  public async toggleShuffle(mode: ShuffleModeType, options: PlayModeChangeOptions = {}) {
     const statusStore = useStatusStore();
     const signal = this.resetCurrentTask();
+    const notify = options.notify ?? true;
 
     const nextMode = mode;
     const currentMode = statusStore.shuffleMode;
@@ -254,13 +277,13 @@ export class PlayModeManager {
       try {
         switch (nextMode) {
           case "on":
-            await this.applyShuffleOn(signal);
+            await this.applyShuffleOn(signal, options);
             break;
           case "heartbeat":
-            await this.applyHeartbeatMode(signal, previousMode);
+            await this.applyHeartbeatMode(signal, previousMode, options);
             break;
           default:
-            await this.applyShuffleOff();
+            await this.applyShuffleOff(options);
             break;
         }
       } catch (e) {
@@ -274,7 +297,9 @@ export class PlayModeManager {
         statusStore.shuffleMode = previousMode;
 
         const errorMsg = (e as Error).message || "模式切换出错";
-        window.$message.error(errorMsg);
+        if (notify) {
+          window.$message.error(errorMsg);
+        }
       }
     }, 10);
   }

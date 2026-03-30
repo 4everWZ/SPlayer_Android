@@ -6,20 +6,30 @@
       {
         show: musicStore.isHasPlayer && statusStore.showPlayBar,
         player: statusStore.showFullPlayer,
+        mobile: isSmallScreen,
       },
     ]"
+    @click="openFullPlayerFromBar"
   >
     <!-- 进度条 -->
     <PlayerSlider />
     <!-- 信息 -->
-    <div :class="['play-data', { 'hidden-cover': settingStore.hiddenCovers.player }]">
+    <div
+      :class="[
+        'play-data',
+        {
+          'hidden-cover': settingStore.hiddenCovers.player,
+          clickable: isSmallScreen,
+        },
+      ]"
+    >
       <!-- 封面 -->
       <Transition name="fade">
         <div
           v-if="!settingStore.hiddenCovers.player"
           :key="musicStore.playSong.cover"
           class="cover"
-          @click.stop="statusStore.showFullPlayer = true"
+          @click.stop="openFullPlayerFromBar"
         >
           <n-image
             :src="musicStore.songCover"
@@ -45,33 +55,29 @@
             <!-- 名称 -->
             <TextContainer
               :key="musicStore.playSong.name"
-              :text="
-                settingStore.hideBracketedContent
-                  ? removeBrackets(musicStore.playSong.name)
-                  : musicStore.playSong.name
-              "
+              :text="playerTitleText"
               :speed="0.2"
               class="name"
               style="cursor: pointer"
-              @click.stop="settingStore.hiddenCovers.player && (statusStore.showFullPlayer = true)"
+              @click.stop="settingStore.hiddenCovers.player && openFullPlayerFromBar()"
             />
             <!-- 倍速 -->
             <n-tag
-              v-if="statusStore.playRate !== 1"
+              v-if="statusStore.playRate !== 1 && !isSmallScreen"
               type="primary"
               size="small"
               round
-              @click="openChangeRate"
+              @click.stop="openChangeRate"
             >
               {{ statusStore.playRate }}x
             </n-tag>
             <!-- 喜欢 -->
             <SvgIcon
-              v-if="musicStore.playSong.type !== 'radio'"
+              v-if="musicStore.playSong.type !== 'radio' && !isSmallScreen"
               :name="dataStore.isLikeSong(musicStore.playSong.id) ? 'Favorite' : 'FavoriteBorder'"
               :size="20"
               class="like"
-              @click="
+              @click.stop="
                 toLikeSong(musicStore.playSong, !dataStore.isLikeSong(musicStore.playSong.id))
               "
             />
@@ -82,16 +88,8 @@
               trigger="click"
               placement="top-start"
             >
-              <SvgIcon name="FormatList" :size="20" :depth="2" class="more" />
+              <SvgIcon name="FormatList" :size="20" :depth="2" class="more" @click.stop />
             </n-dropdown>
-            <SvgIcon
-              v-else
-              name="FormatList"
-              :size="20"
-              :depth="2"
-              class="more"
-              @click="showSongMoreDrawer = true"
-            />
           </div>
           <div class="lyric-container">
             <Transition
@@ -113,7 +111,7 @@
                   <n-text
                     v-if="musicStore.playSong.type === 'radio'"
                     class="ar-item"
-                    @click="showCreatorTip"
+                    @click.stop="showCreatorTip"
                   >
                     {{ musicStore.playSong.dj?.creator || "未知艺术家" }}
                   </n-text>
@@ -122,7 +120,7 @@
                       v-for="(item, index) in musicStore.playSong.artists"
                       :key="index"
                       class="ar-item"
-                      @click="openJumpArtist(musicStore.playSong.artists, item.id)"
+                      @click.stop="openJumpArtist(musicStore.playSong.artists, item.id)"
                     >
                       {{
                         settingStore.hideBracketedContent ? removeBrackets(item.name) : item.name
@@ -132,7 +130,7 @@
                   <n-text
                     v-else
                     class="ar-item"
-                    @click="openJumpArtist(musicStore.playSong.artists)"
+                    @click.stop="openJumpArtist(musicStore.playSong.artists)"
                   >
                     {{
                       settingStore.hideBracketedContent
@@ -148,10 +146,12 @@
       </Transition>
     </div>
     <!-- 控制 -->
-    <n-flex :size="8" align="center" justify="center" class="play-control">
+    <n-flex :size="8" align="center" justify="center" class="play-control" @click.stop>
       <!-- 随机按钮 -->
-      <template v-if="musicStore.playSong.type !== 'radio' && !statusStore.personalFmMode">
-        <div class="play-icon" @click.stop="player.toggleShuffle()">
+      <template
+        v-if="musicStore.playSong.type !== 'radio' && !statusStore.personalFmMode && !isSmallScreen"
+      >
+        <div class="play-icon mode-icon" @click.stop="player.toggleShuffle()">
           <SvgIcon
             :name="statusStore.shuffleIcon"
             :size="20"
@@ -173,7 +173,11 @@
         <SvgIcon class="icon" :size="18" name="ThumbDown" />
       </div>
       <!-- 上一曲 -->
-      <div v-else class="play-icon" v-debounce="() => player.nextOrPrev('prev')">
+      <div
+        v-else-if="!isSmallScreen"
+        class="play-icon nav-icon"
+        v-debounce="() => player.nextOrPrev('prev')"
+      >
         <SvgIcon :size="26" name="SkipPrev" />
       </div>
       <!-- 播放暂停 -->
@@ -199,12 +203,18 @@
         </template>
       </n-button>
       <!-- 下一曲 -->
-      <div class="play-icon" v-debounce="() => player.nextOrPrev('next')">
+      <div
+        v-if="!isSmallScreen"
+        class="play-icon nav-icon"
+        v-debounce="() => player.nextOrPrev('next')"
+      >
         <SvgIcon :size="26" name="SkipNext" />
       </div>
       <!-- 循环按钮 -->
-      <template v-if="musicStore.playSong.type !== 'radio' && !statusStore.personalFmMode">
-        <div class="play-icon" @click.stop="player.toggleRepeat()">
+      <template
+        v-if="musicStore.playSong.type !== 'radio' && !statusStore.personalFmMode && !isSmallScreen"
+      >
+        <div class="play-icon mode-icon" @click.stop="player.toggleRepeat()">
           <SvgIcon
             :name="statusStore.repeatIcon"
             :size="20"
@@ -220,6 +230,7 @@
         :size="[8, 0]"
         class="play-menu"
         justify="end"
+        @click.stop
       >
         <!-- 时间相关 -->
         <Transition name="fade" mode="out-in">
@@ -250,7 +261,7 @@
           </n-flex>
         </Transition>
         <!-- 功能区 -->
-        <PlayerRightMenu />
+        <PlayerRightMenu compact-mobile />
       </n-flex>
     </Transition>
     <n-drawer
@@ -262,7 +273,7 @@
       <n-drawer-content
         title="更多操作"
         :native-scrollbar="false"
-        :body-content-style="{ padding: '0 16px calc(env(safe-area-inset-bottom) + 16px)' }"
+        :body-content-style="{ padding: '0 16px calc(var(--safe-area-inset-bottom) + 16px)' }"
       >
         <n-flex vertical size="small" class="mobile-action-list">
           <n-button
@@ -278,6 +289,7 @@
         </n-flex>
       </n-drawer-content>
     </n-drawer>
+    <PlayerModePanel />
   </div>
 </template>
 
@@ -285,6 +297,7 @@
 import { usePlayerController } from "@/core/player/PlayerController";
 import { useSongManager } from "@/core/player/SongManager";
 import { useMobile } from "@/composables/useMobile";
+import PlayerModePanel from "@/components/Player/PlayerModePanel.vue";
 import { useDataStore, useMusicStore, useSettingStore, useStatusStore } from "@/stores";
 import { toLikeSong } from "@/utils/auth";
 import { useTimeFormat } from "@/composables/useTimeFormat";
@@ -315,7 +328,40 @@ const { isSmallScreen } = useMobile();
 const { timeDisplay, toggleTimeFormat } = useTimeFormat();
 
 const playerRef = ref<HTMLElement | null>(null);
-const showSongMoreDrawer = ref(false);
+const showSongMoreDrawer = computed({
+  get: () => statusStore.playerSongMenuOpen,
+  set: (value: boolean) => {
+    statusStore.playerSongMenuOpen = value;
+  },
+});
+
+const openFullPlayerFromBar = () => {
+  if (!isSmallScreen.value) return;
+  statusStore.showFullPlayer = true;
+};
+
+const playerTitleText = computed(() => {
+  const songName = settingStore.hideBracketedContent
+    ? removeBrackets(musicStore.playSong.name)
+    : musicStore.playSong.name;
+
+  if (!isSmallScreen.value) return songName;
+
+  let artist = "";
+  if (musicStore.playSong.type === "radio") {
+    artist = musicStore.playSong.dj?.creator || "播客电台";
+  } else if (Array.isArray(musicStore.playSong.artists)) {
+    artist = musicStore.playSong.artists
+      .map((item) => (settingStore.hideBracketedContent ? removeBrackets(item.name) : item.name))
+      .join(" / ");
+  } else {
+    artist = settingStore.hideBracketedContent
+      ? removeBrackets(musicStore.playSong.artists)
+      : musicStore.playSong.artists || "";
+  }
+
+  return artist ? `${songName} - ${artist}` : songName;
+});
 
 // 触摸滑动切换歌曲
 const { direction } = useSwipe(playerRef, {
@@ -510,9 +556,9 @@ const showCreatorTip = () => window.$message.info("暂不支持查看主播主�
 .main-player {
   position: fixed;
   left: 0;
-  bottom: calc(-90px - env(safe-area-inset-bottom));
-  height: calc(80px + env(safe-area-inset-bottom));
-  padding: 0 15px env(safe-area-inset-bottom) 15px;
+  bottom: calc(-90px - var(--safe-area-inset-bottom));
+  height: calc(80px + var(--safe-area-inset-bottom));
+  padding: 0 15px var(--safe-area-inset-bottom) 15px;
   width: 100%;
   background-color: var(--surface-container-hex);
   display: grid;
@@ -542,6 +588,9 @@ const showCreatorTip = () => window.$message.info("暂不支持查看主播主�
     height: 100%;
     max-width: 640px;
     padding-left: 68px;
+    &.clickable {
+      cursor: pointer;
+    }
     .cover {
       position: absolute;
       display: flex;
@@ -765,11 +814,77 @@ const showCreatorTip = () => window.$message.info("暂不支持查看主播主�
     }
   }
   @media (max-width: 810px) {
-    grid-template-columns: 1fr auto auto;
+    left: 12px;
+    width: calc(100% - 24px);
+    bottom: calc(-92px - var(--safe-area-inset-bottom));
+    height: calc(72px + var(--safe-area-inset-bottom));
+    padding: 0 12px var(--safe-area-inset-bottom);
+    background-color: rgba(var(--surface-container), 0.96);
+    border-radius: 24px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    column-gap: 10px;
+    .player-slider {
+      display: none;
+    }
     .play-control {
-      margin: 0 0 0 12px;
-      .play-icon {
+      margin: 0;
+      .mode-icon {
         display: none;
+      }
+      .nav-icon {
+        display: none;
+      }
+      .play-pause {
+        --n-width: 46px;
+        --n-height: 46px;
+        margin: 0;
+      }
+    }
+    .play-data {
+      min-width: 0;
+      padding-left: 58px;
+      padding-right: 0;
+      .cover {
+        width: 46px;
+        height: 46px;
+        min-width: 46px;
+        border-radius: 50%;
+        :deep(img) {
+          width: 46px;
+          height: 46px;
+          opacity: 1;
+        }
+        .n-icon {
+          display: none;
+        }
+      }
+      .info {
+        justify-content: center;
+        .data {
+          .name {
+            font-size: 15px;
+            line-height: 1.35;
+          }
+          .like,
+          .more,
+          .n-tag {
+            display: none;
+          }
+        }
+        .lyric-container {
+          display: none;
+        }
+      }
+    }
+    .play-menu {
+      max-width: none;
+      margin-left: 0;
+      :deep(.right-menu) {
+        gap: 0 !important;
+        .menu-icon {
+          padding: 10px;
+        }
       }
     }
   }

@@ -1,7 +1,7 @@
 <template>
   <n-flex :size="8" align="center" class="right-menu">
     <!-- 音质 -->
-    <template v-if="settingStore.showPlayerQuality">
+    <template v-if="settingStore.showPlayerQuality && !isCompactMobile">
       <n-popselect
         v-if="isOnlineSong"
         v-model:show="showQualityPopover"
@@ -40,7 +40,7 @@
     </template>
     <!-- 桌面歌词 -->
     <n-badge
-      v-if="isElectron && settingStore.fullscreenPlayerElements.desktopLyric"
+      v-if="isElectron && settingStore.fullscreenPlayerElements.desktopLyric && !isCompactMobile"
       value="ON"
       :show="statusStore.showDesktopLyric"
       class="hidden"
@@ -51,7 +51,9 @@
     </n-badge>
     <!-- 其他控制 -->
     <n-dropdown
-      v-if="settingStore.fullscreenPlayerElements.moreSettings && !isSmallScreen"
+      v-if="
+        settingStore.fullscreenPlayerElements.moreSettings && !isSmallScreen && !isCompactMobile
+      "
       :options="controlsOptions"
       :show-arrow="false"
       @select="handleControls"
@@ -61,14 +63,14 @@
       </div>
     </n-dropdown>
     <div
-      v-else-if="settingStore.fullscreenPlayerElements.moreSettings"
+      v-else-if="settingStore.fullscreenPlayerElements.moreSettings && !isCompactMobile"
       class="menu-icon hidden"
       @click.stop="showControlsDrawer = true"
     >
       <SvgIcon name="Controls" />
     </div>
     <!-- 音量 -->
-    <n-popover :show-arrow="false" :style="{ padding: 0 }">
+    <n-popover v-if="!isCompactMobile" :show-arrow="false" :style="{ padding: 0 }">
       <template #trigger>
         <div class="menu-icon hidden" @click.stop="player.toggleMute" @wheel="player.setVolume">
           <SvgIcon :name="statusStore.playVolumeIcon" />
@@ -88,13 +90,20 @@
       </div>
     </n-popover>
     <!-- 播放列表 -->
+    <div
+      v-if="!statusStore.personalFmMode && isSmallScreen && !isCompactMobile"
+      class="menu-icon mobile-mode-trigger"
+      @click.stop="player.cyclePlayMode()"
+    >
+      <SvgIcon :name="statusStore.playerModeIcon" />
+    </div>
     <n-badge
       v-if="!statusStore.personalFmMode"
       :value="dataStore.playList?.length ?? 0"
-      :show="settingStore.showPlaylistCount"
+      :show="settingStore.showPlaylistCount && !isCompactMobile"
       :max="9999"
       :style="{
-        marginRight: settingStore.showPlaylistCount ? '12px' : null,
+        marginRight: settingStore.showPlaylistCount && !isCompactMobile ? '12px' : null,
       }"
     >
       <div class="menu-icon" @click.stop="statusStore.playListShow = !statusStore.playListShow">
@@ -110,7 +119,7 @@
       <n-drawer-content
         title="更多控制"
         :native-scrollbar="false"
-        :body-content-style="{ padding: '0 16px calc(env(safe-area-inset-bottom) + 16px)' }"
+        :body-content-style="{ padding: '0 16px calc(var(--safe-area-inset-bottom) + 16px)' }"
       >
         <n-flex vertical size="small" class="mobile-action-list">
           <n-button
@@ -141,12 +150,22 @@ import { useAudioManager } from "@/core/player/AudioManager";
 import type { DropdownOption } from "naive-ui";
 import { useQualityControl } from "@/composables/useQualityControl";
 
+const props = withDefaults(
+  defineProps<{
+    compactMobile?: boolean;
+  }>(),
+  {
+    compactMobile: false,
+  },
+);
+
 const dataStore = useDataStore();
 const statusStore = useStatusStore();
 const settingStore = useSettingStore();
 const musicStore = useMusicStore();
 const player = usePlayerController();
 const { isSmallScreen } = useMobile();
+const isCompactMobile = computed(() => props.compactMobile && isSmallScreen.value);
 
 const {
   currentPlayingLevel,
@@ -159,7 +178,12 @@ const {
 
 const showQualityPopover = ref(false);
 const qualityTagRef = ref<HTMLElement | null>(null);
-const showControlsDrawer = ref(false);
+const showControlsDrawer = computed({
+  get: () => statusStore.playerControlsDrawerOpen,
+  set: (value: boolean) => {
+    statusStore.playerControlsDrawerOpen = value;
+  },
+});
 
 const handleQualityClick = async () => {
   if (showQualityPopover.value) {
@@ -184,6 +208,15 @@ const handleClickOutside = (e: MouseEvent) => {
 const audioManager = useAudioManager();
 
 const controlsOptions = computed<DropdownOption[]>(() => [
+  ...(isSmallScreen.value && !statusStore.personalFmMode && !isCompactMobile.value
+    ? [
+        {
+          label: "播放模式",
+          key: "playMode",
+          icon: renderIcon(statusStore.playerModeIcon),
+        } satisfies DropdownOption,
+      ]
+    : []),
   {
     label: "均衡器",
     key: "equalizer",
@@ -211,6 +244,9 @@ const controlsOptions = computed<DropdownOption[]>(() => [
 // 更多功能选择
 const handleControls = (key: string) => {
   switch (key) {
+    case "playMode":
+      statusStore.playerModePanelOpen = true;
+      break;
     case "equalizer":
       if (!audioManager.capabilities.supportsEqualizer) {
         window.$message.warning("当前引擎不支持均衡器功能");

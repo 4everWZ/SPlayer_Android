@@ -2,12 +2,24 @@
 <template>
   <n-drawer
     v-model:show="statusStore.playListShow"
-    :class="{ 'full-player': statusStore.showFullPlayer }"
+    :class="[
+      {
+        'full-player': statusStore.showFullPlayer,
+        'mobile-playlist': isSmallScreen,
+      },
+    ]"
     :auto-focus="false"
+    :placement="drawerPlacement"
     id="main-playlist"
-    style="width: 400px"
+    :style="drawerStyle"
+    :height="drawerHeight"
   >
-    <n-drawer-content :native-scrollbar="false" closable>
+    <n-drawer-content
+      :native-scrollbar="false"
+      :body-content-style="drawerBodyStyle"
+      :footer-style="drawerFooterStyle"
+      closable
+    >
       <template #header>
         <div class="playlist-header">
           <n-text class="name">播放队列</n-text>
@@ -25,8 +37,8 @@
           :default-scroll-index="statusStore.playIndex"
           class="playlist-list"
           :class="{ 'is-dragging-global': isDragging }"
-          style="max-height: calc(100vh - 142px)"
-          :height="`calc(100vh - 142px)`"
+          :style="{ maxHeight: listHeight }"
+          :height="listHeight"
         >
           <template #default="{ item: songData, index }">
             <div class="song-node">
@@ -168,6 +180,7 @@
 <script setup lang="ts">
 import VirtualScroll from "@/components/UI/VirtualScroll.vue";
 import { usePlayerController } from "@/core/player/PlayerController";
+import { useMobile } from "@/composables/useMobile";
 import { useDataStore, useSettingStore, useStatusStore } from "@/stores";
 import { removeBrackets } from "@/utils/format";
 import { useDragSort } from "@/composables/List/useDragSort";
@@ -176,8 +189,34 @@ const dataStore = useDataStore();
 const statusStore = useStatusStore();
 const settingStore = useSettingStore();
 const player = usePlayerController();
+const { isSmallScreen } = useMobile();
 
 const playListRef = ref<InstanceType<typeof VirtualScroll> | null>(null);
+
+const drawerPlacement = computed(() => (isSmallScreen.value ? "bottom" : "right"));
+const drawerStyle = computed(() => (isSmallScreen.value ? undefined : { width: "400px" }));
+const drawerHeight = computed(() =>
+  isSmallScreen.value ? "calc(100dvh - var(--safe-area-inset-top) - 12px)" : undefined,
+);
+const drawerBodyStyle = computed(() =>
+  isSmallScreen.value
+    ? {
+        padding: "0 0 calc(var(--safe-area-inset-bottom) + 8px)",
+      }
+    : undefined,
+);
+const drawerFooterStyle = computed(() =>
+  isSmallScreen.value
+    ? {
+        padding: "16px 16px calc(var(--safe-area-inset-bottom) + 16px)",
+      }
+    : undefined,
+);
+const listHeight = computed(() =>
+  isSmallScreen.value
+    ? "calc(100dvh - var(--safe-area-inset-top) - var(--safe-area-inset-bottom) - 196px)"
+    : "calc(100vh - 142px)",
+);
 
 // 播放列表数据
 const playListData = computed(() => {
@@ -440,6 +479,29 @@ const {
   .n-drawer-footer {
     height: 72px;
     padding: 16px;
+  }
+  &.mobile-playlist {
+    --n-border-radius: 24px 24px 0 0;
+    .n-drawer-header {
+      height: auto;
+      min-height: 88px;
+      padding-top: calc(var(--safe-area-inset-top) + 16px);
+      align-items: flex-end;
+    }
+    .n-drawer-body-content-wrapper {
+      padding-bottom: 0;
+    }
+    .n-drawer-footer {
+      height: auto;
+      min-height: calc(72px + var(--safe-area-inset-bottom));
+      padding: 16px 16px calc(var(--safe-area-inset-bottom) + 16px);
+    }
+    .playlist-list {
+      padding: 8px 16px 16px;
+    }
+    .playlist-menu {
+      height: auto;
+    }
   }
   &.full-player {
     --n-color: rgb(var(--main-cover-color));

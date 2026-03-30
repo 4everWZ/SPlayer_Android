@@ -2,6 +2,7 @@ import { toRaw } from "vue";
 import { useMusicStore, useSettingStore } from "@/stores";
 import type { SongLyric } from "@/types/lyric";
 import { useLyricManager } from "./LyricManager";
+import { androidMediaBridge } from "./AndroidMediaBridge";
 import { TASKBAR_IPC_CHANNELS, type SyncStatePayload, type SyncTickPayload } from "@/types/shared";
 import type { PlayModePayload, RepeatModeType, ShuffleModeType } from "@/types/shared/play-mode";
 import { isElectron, isMac } from "@/utils/env";
@@ -243,6 +244,31 @@ export const sendPlayMode = (repeatMode: RepeatModeType, shuffleMode: ShuffleMod
   }
 };
 
+const toUint8Array = (value: unknown): Uint8Array | null => {
+  if (value instanceof Uint8Array) return value;
+  if (Array.isArray(value)) return Uint8Array.from(value);
+  if (
+    value &&
+    typeof value === "object" &&
+    "length" in value &&
+    typeof (value as ArrayLike<number>).length === "number"
+  ) {
+    return Uint8Array.from(value as ArrayLike<number>);
+  }
+  return null;
+};
+
+const toBase64 = (value: unknown): string | undefined => {
+  const bytes = toUint8Array(value);
+  if (!bytes?.length) return undefined;
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
+  }
+  return btoa(binary);
+};
+
 ///////////////////////////////////////////
 //
 // 媒体控件
@@ -259,7 +285,17 @@ type EmiModule = typeof import("@emi"); // 用于 JSDoc
  * @see {@link EmiModule.updateMetadata 外部媒体集成模块的 `updateMetadata` 方法}
  */
 export const sendMediaMetadata = (payload: MetadataParam) =>
-  sendIpc("media-update-metadata", payload);
+  isElectron
+    ? sendIpc("media-update-metadata", payload)
+    : void androidMediaBridge.updateMetadata({
+        title: payload.songName,
+        artist: payload.authorName,
+        album: payload.albumName,
+        coverUrl: payload.originalCoverUrl,
+        coverBase64: toBase64(payload.coverData),
+        duration: payload.duration,
+        ncmId: payload.ncmId,
+      });
 
 /**
  * @description 通过外部媒体集成模块更新媒体控件和 Discord RPC 的播放状态
@@ -268,7 +304,9 @@ export const sendMediaMetadata = (payload: MetadataParam) =>
  * @see {@link EmiModule.updatePlayState 外部媒体集成模块的 `updatePlayState` 方法}
  */
 export const sendMediaPlayState = (status: PlaybackStatus) =>
-  sendIpc("media-update-play-state", { status });
+  isElectron
+    ? sendIpc("media-update-play-state", { status })
+    : void androidMediaBridge.updatePlayState(status);
 
 /**
  * @description 通过外部媒体集成模块更新媒体控件的播放速率
@@ -277,7 +315,9 @@ export const sendMediaPlayState = (status: PlaybackStatus) =>
  * @see {@link EmiModule.updatePlaybackRate 外部媒体集成模块的 `updatePlaybackRate` 方法}
  */
 export const sendMediaPlaybackRate = (rate: number) =>
-  sendIpc("media-update-playback-rate", { rate });
+  isElectron
+    ? sendIpc("media-update-playback-rate", { rate })
+    : void androidMediaBridge.updatePlaybackRate(rate);
 
 /**
  * @description 通过外部媒体集成模块更新媒体控件的音量
@@ -285,7 +325,10 @@ export const sendMediaPlaybackRate = (rate: number) =>
  * @param volume - 音量，范围是 0.0（静音）到 1.0（最大音量）
  * @see {@link EmiModule.updateVolume 外部媒体集成模块的 `updateVolume` 方法}
  */
-export const sendMediaVolume = (volume: number) => sendIpc("media-update-volume", { volume });
+export const sendMediaVolume = (volume: number) =>
+  isElectron
+    ? sendIpc("media-update-volume", { volume })
+    : void androidMediaBridge.updateVolume(volume);
 
 /**
  * @description 通过外部媒体集成模块更新媒体控件和 Discord RPC 的播放状态
@@ -296,7 +339,9 @@ export const sendMediaVolume = (volume: number) => sendIpc("media-update-volume"
  * @see {@link EmiModule.updateTimeline 外部媒体集成模块的 `updateTimeline` 方法}
  */
 export const sendMediaTimeline = (currentTime: number, totalTime: number, seeked?: boolean) =>
-  sendIpc("media-update-timeline", { currentTime, totalTime, seeked });
+  isElectron
+    ? sendIpc("media-update-timeline", { currentTime, totalTime, seeked })
+    : void androidMediaBridge.updateTimeline(currentTime, totalTime, seeked);
 
 /**
  * @description 通过外部媒体集成模块更新媒体控件的播放模式。不会更新 Discord RPC 的播放状态
@@ -306,7 +351,9 @@ export const sendMediaTimeline = (currentTime: number, totalTime: number, seeked
  * @see {@link EmiModule.updatePlayMode 外部媒体集成模块的 `updatePlayMode` 方法}
  */
 export const sendMediaPlayMode = (isShuffling: boolean, repeatMode: RepeatMode) =>
-  sendIpc("media-update-play-mode", { isShuffling, repeatMode });
+  isElectron
+    ? sendIpc("media-update-play-mode", { isShuffling, repeatMode })
+    : void androidMediaBridge.updatePlayMode(isShuffling, repeatMode);
 
 ///////////////////////////////////////////
 //

@@ -170,7 +170,7 @@
       <n-drawer-content
         title="更多操作"
         :native-scrollbar="false"
-        :body-content-style="{ padding: '0 16px calc(env(safe-area-inset-bottom) + 16px)' }"
+        :body-content-style="{ padding: '0 16px calc(var(--safe-area-inset-bottom) + 16px)' }"
       >
         <n-flex vertical size="small" class="mobile-action-list">
           <n-button
