@@ -53,6 +53,7 @@ pnpm exec tsx server/standalone/index.ts
 
 - [Dockerfile](/deploy/server/Dockerfile)
 - [docker-compose.yml](/deploy/server/docker-compose.yml)
+- [docker-compose.registry.yml](/deploy/server/docker-compose.registry.yml)
 - [nginx.conf](/deploy/server/nginx.conf)
 
 ### 构建镜像
@@ -86,6 +87,48 @@ docker compose up -d
 - `nginx`：对外统一反代入口
 
 外部访问仍然是 `http://你的服务器:25884/api/...`
+
+### GitHub Actions 自动构建
+
+仓库里已经新增了专门给 standalone API 用的工作流：
+
+- [docker-server.yml](/.github/workflows/docker-server.yml)
+
+这条工作流会在以下场景自动构建并推送到 GHCR：
+
+- 推送 `main`
+- 推送 `dev`
+- 推送 `feat/android-v1-capacitor`
+- 手动触发 `workflow_dispatch`
+- 发布 release
+
+镜像默认会推到：
+
+```text
+ghcr.io/<你的 GitHub 用户名小写>/splayer-api
+```
+
+常见标签规则：
+
+- 默认分支会带 `latest`
+- 分支构建会带分支名标签
+- 每次构建都会带 `sha-<提交哈希>`
+
+如果你准备在 Oracle 上直接拉镜像，不需要在服务器本地 build，直接用 registry 版 compose 即可：
+
+```bash
+cd deploy/server
+export SERVER_IMAGE=ghcr.io/<你的 GitHub 用户名小写>/splayer-api:latest
+docker compose -f docker-compose.registry.yml pull
+docker compose -f docker-compose.registry.yml up -d
+```
+
+如果服务器上也跑了桌面版或其他本地服务占用了 `25884`，可以额外指定宿主机端口：
+
+```bash
+export HOST_PORT=25885
+docker compose -f docker-compose.registry.yml up -d
+```
 
 ## Nginx 反代
 

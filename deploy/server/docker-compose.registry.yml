@@ -1,0 +1,23 @@
+services:
+  api:
+    image: ${SERVER_IMAGE:-ghcr.io/4everwz/splayer-api:latest}
+    container_name: splayer-api
+    environment:
+      HOST: 0.0.0.0
+      PORT: 25884
+      VITE_SERVER_PORT: 25884
+      AMLL_DB_SERVER: ${AMLL_DB_SERVER:-https://amlldb.bikonoo.com/ncm-lyrics/%s.ttml}
+    expose:
+      - "25884"
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: splayer-api-nginx
+    depends_on:
+      - api
+    ports:
+      - "${HOST_PORT:-25884}:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    restart: unless-stopped
