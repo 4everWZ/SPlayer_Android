@@ -64,6 +64,7 @@ public class AndroidMediaBridgePlugin extends Plugin {
     private long currentDuration = 0L;
     private long currentPosition = 0L;
     private boolean currentPlaying = false;
+    private String currentPlaybackStatus = "Paused";
     private float currentPlaybackRate = 1F;
     private boolean currentShuffling = false;
     private String currentRepeatMode = "None";
@@ -108,7 +109,8 @@ public class AndroidMediaBridgePlugin extends Plugin {
 
     @PluginMethod
     public void updatePlayState(PluginCall call) {
-        currentPlaying = "Playing".equalsIgnoreCase(call.getString("status", "Paused"));
+        currentPlaybackStatus = call.getString("status", currentPlaybackStatus);
+        currentPlaying = isPlaybackActive();
         syncPlaybackWakeLock();
         updatePlaybackState();
         refreshNotification();
@@ -164,7 +166,7 @@ public class AndroidMediaBridgePlugin extends Plugin {
     private void syncPlaybackWakeLock() {
         if (playbackWakeLock == null) return;
         try {
-            if (currentPlaying) {
+            if (isPlaybackActive()) {
                 if (!playbackWakeLock.isHeld()) {
                     playbackWakeLock.acquire();
                 }
@@ -281,8 +283,15 @@ public class AndroidMediaBridgePlugin extends Plugin {
                 PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS |
                 PlaybackStateCompat.ACTION_STOP |
                 PlaybackStateCompat.ACTION_SEEK_TO;
-        int state = currentPlaying ? PlaybackStateCompat.STATE_PLAYING : PlaybackStateCompat.STATE_PAUSED;
-        float speed = currentPlaying ? currentPlaybackRate : 0F;
+        int state;
+        if (isPlaybackLoading()) {
+            state = PlaybackStateCompat.STATE_BUFFERING;
+        } else if (isPlaybackPlaying()) {
+            state = PlaybackStateCompat.STATE_PLAYING;
+        } else {
+            state = PlaybackStateCompat.STATE_PAUSED;
+        }
+        float speed = isPlaybackPlaying() ? currentPlaybackRate : 0F;
         PlaybackStateCompat.Builder builder = new PlaybackStateCompat.Builder()
                 .setActions(actions)
                 .setState(state, currentPosition, speed, SystemClock.elapsedRealtime());
@@ -312,6 +321,8 @@ public class AndroidMediaBridgePlugin extends Plugin {
             return;
         }
 
+        boolean playbackActive = isPlaybackActive();
+
         Notification notification = new NotificationCompat.Builder(getContext(), CHANNEL_ID)
                 .setSmallIcon(R.mipmap.ic_launcher)
                 .setContentTitle(currentTitle)
@@ -320,8 +331,8 @@ public class AndroidMediaBridgePlugin extends Plugin {
                 .setLargeIcon(currentArtwork)
                 .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
                 .setOnlyAlertOnce(true)
-                .setOngoing(currentPlaying)
-                .setSilent(!currentPlaying)
+                .setOngoing(playbackActive)
+                .setSilent(!playbackActive)
                 .setContentIntent(buildContentIntent())
                 .addAction(
                         android.R.drawable.ic_media_previous,
@@ -329,9 +340,9 @@ public class AndroidMediaBridgePlugin extends Plugin {
                         buildControlIntent(ACTION_PREVIOUS)
                 )
                 .addAction(
-                        currentPlaying ? android.R.drawable.ic_media_pause : android.R.drawable.ic_media_play,
-                        currentPlaying ? "暂停" : "播放",
-                        buildControlIntent(currentPlaying ? ACTION_PAUSE : ACTION_PLAY)
+                        playbackActive ? android.R.drawable.ic_media_pause : android.R.drawable.ic_media_play,
+                        playbackActive ? "暂停" : "播放",
+                        buildControlIntent(playbackActive ? ACTION_PAUSE : ACTION_PLAY)
                 )
                 .addAction(
                         android.R.drawable.ic_media_next,
@@ -415,5 +426,17 @@ public class AndroidMediaBridgePlugin extends Plugin {
     private float readFloat(PluginCall call, String key, float fallbackValue) {
         Float value = call.getFloat(key);
         return value == null ? fallbackValue : value;
+    }
+
+    private boolean isPlaybackPlaying() {
+        return "Playing".equalsIgnoreCase(currentPlaybackStatus);
+    }
+
+    private boolean isPlaybackLoading() {
+        return "Loading".equalsIgnoreCase(currentPlaybackStatus);
+    }
+
+    private boolean isPlaybackActive() {
+        return isPlaybackPlaying() || isPlaybackLoading();
     }
 }

@@ -27,6 +27,11 @@ class MediaSessionManager {
   private currentRate: number = 1;
   private nativeMediaListener: PluginListenerHandle | null = null;
 
+  private resolveAndroidPlaybackStatus(isPlaying: boolean, isLoading: boolean) {
+    if (isLoading) return "Loading";
+    return isPlaying ? "Playing" : "Paused";
+  }
+
   private throttledSendTimeline = throttle((currentTime: number, duration: number) => {
     sendMediaTimeline(currentTime, duration);
   }, 200);
@@ -154,7 +159,9 @@ class MediaSessionManager {
       );
       sendMediaPlaybackRate(statusStore.playRate);
       sendMediaVolume(statusStore.playVolume);
-      sendMediaPlayState(statusStore.playStatus ? "Playing" : "Paused");
+      androidMediaBridge.updatePlayState(
+        this.resolveAndroidPlaybackStatus(statusStore.playStatus, statusStore.playLoading),
+      );
       return;
     }
 
@@ -321,6 +328,9 @@ class MediaSessionManager {
 
     // 原生插件
     if (this.shouldUseNativeMedia()) {
+      if (androidMediaBridge.isSupported && useStatusStore().playLoading && !immediate) {
+        return;
+      }
       if (immediate) {
         this.throttledSendTimeline.cancel();
         // 绝对位置更新，避免 Seek 操作的进度更新被限流丢弃
@@ -340,8 +350,28 @@ class MediaSessionManager {
    */
   public updatePlaybackStatus(isPlaying: boolean) {
     // 发送到原生插件
-    if (this.shouldUseNativeMedia()) {
+    if (androidMediaBridge.isSupported) {
+      androidMediaBridge.updatePlayState(this.resolveAndroidPlaybackStatus(isPlaying, false));
+      return;
+    }
+
+    if (isElectron) {
       sendMediaPlayState(isPlaying ? "Playing" : "Paused");
+    }
+  }
+
+  /**
+   * 更新加载状态
+   */
+  public updateLoadingStatus(isLoading: boolean) {
+    if (!androidMediaBridge.isSupported) return;
+    const statusStore = useStatusStore();
+    androidMediaBridge.updatePlayState(
+      this.resolveAndroidPlaybackStatus(statusStore.playStatus, isLoading),
+    );
+    if (!isLoading) {
+      this.throttledSendTimeline.cancel();
+      sendMediaTimeline(statusStore.currentTime, statusStore.duration, true);
     }
   }
 

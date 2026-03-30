@@ -536,6 +536,7 @@ class PlayerController {
       if (!autoPlay) {
         // 立即将 UI 置为暂停，防止事件竞态导致短暂显示为播放
         statusStore.playStatus = false;
+        mediaSessionManager.updatePlaybackStatus(false);
         playerIpc.sendPlayStatus(false);
         playerIpc.sendTaskbarState({ isPlaying: false });
         playerIpc.sendTaskbarMode("paused");
@@ -666,6 +667,7 @@ class PlayerController {
     // 加载状态
     audioManager.addEventListener("loadstart", () => {
       statusStore.playLoading = true;
+      mediaSessionManager.updateLoadingStatus(true);
     });
 
     // 加载完成
@@ -673,6 +675,7 @@ class PlayerController {
       const playSongData = getPlaySongData();
       // 结束加载
       statusStore.playLoading = false;
+      mediaSessionManager.updateLoadingStatus(false);
       // 恢复 EQ
       if (isElectron && statusStore.eqEnabled) {
         const bands = statusStore.eqBands;
