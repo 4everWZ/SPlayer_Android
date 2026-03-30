@@ -46,6 +46,18 @@ docker run -d --name SPlayer -p 25884:25884 imsyy/splayer:latest
 
 启动成功后访问 `http://localhost:25884`
 
+### 服务器 API 部署
+
+如果你只想把桌面端背后的 API 能力单独部署到服务器上，可以参考 [服务器 API 部署](./deployment/server-api)。
+
+这份方案只覆盖可独立运行的能力：
+
+- `/api/netease`
+- `/api/unblock`
+- `/api/qqmusic`
+
+`/api/control` 仍然依赖 Electron 桌面主进程，不属于纯服务端容器化范围。
+
 ### Vercel 部署
 
 1. 先部署 [NeteaseCloudMusicApi](https://github.com/neteasecloudmusicapienhanced/api-enhanced) 并获取 API 地址

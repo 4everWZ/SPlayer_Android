@@ -30,6 +30,7 @@ export default defineConfig({
           { text: "下载", link: "/download" },
           { text: "使用指南", link: "/guide" },
           { text: "流媒体服务", link: "/streaming" },
+          { text: "服务器 API 部署", link: "/deployment/server-api" },
         ],
       },
       {

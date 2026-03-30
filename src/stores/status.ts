@@ -294,7 +294,10 @@ export const useStatusStore = defineStore("status", {
       if (state.repeatMode === "one") {
         return "RepeatSong";
       }
-      return "Repeat";
+      if (state.repeatMode === "list") {
+        return "Repeat";
+      }
+      return "List";
     },
     /** 移动端模式面板当前主状态 */
     playerModeKey(state) {
@@ -309,7 +312,8 @@ export const useStatusStore = defineStore("status", {
       if (state.shuffleMode === "heartbeat") return "HeartBit";
       if (state.shuffleMode === "on") return "Shuffle";
       if (state.repeatMode === "one") return "RepeatSong";
-      return "Repeat";
+      if (state.repeatMode === "list") return "Repeat";
+      return "List";
     },
     /** 音量百分比 */
     playVolumePercent(state) {

@@ -54,7 +54,7 @@ const modeOptions = computed(() => [
     key: "repeat-off" as PlayerModeKey,
     label: "顺序播放",
     tip: "播完当前队列后停止",
-    icon: "Repeat",
+    icon: "List",
     disabled: false,
   },
   {

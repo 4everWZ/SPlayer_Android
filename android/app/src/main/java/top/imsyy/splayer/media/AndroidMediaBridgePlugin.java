@@ -12,6 +12,7 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.os.Build;
 import android.os.PowerManager;
+import android.os.SystemClock;
 import android.support.v4.media.MediaMetadataCompat;
 import android.support.v4.media.session.MediaSessionCompat;
 import android.support.v4.media.session.PlaybackStateCompat;
@@ -97,9 +98,10 @@ public class AndroidMediaBridgePlugin extends Plugin {
         currentTitle = call.getString("title", "");
         currentArtist = call.getString("artist", "");
         currentAlbum = call.getString("album", "");
-        currentDuration = Math.max(0L, call.getLong("duration", currentDuration));
+        currentDuration = readLong(call, "duration", currentDuration);
         currentArtwork = decodeArtwork(call.getString("coverBase64", null));
         updateSessionMetadata();
+        updatePlaybackState();
         refreshNotification();
         call.resolve();
     }
@@ -115,7 +117,7 @@ public class AndroidMediaBridgePlugin extends Plugin {
 
     @PluginMethod
     public void updatePlaybackRate(PluginCall call) {
-        currentPlaybackRate = Math.max(0.1F, call.getFloat("rate", currentPlaybackRate));
+        currentPlaybackRate = Math.max(0.1F, readFloat(call, "rate", currentPlaybackRate));
         updatePlaybackState();
         call.resolve();
     }
@@ -127,8 +129,9 @@ public class AndroidMediaBridgePlugin extends Plugin {
 
     @PluginMethod
     public void updateTimeline(PluginCall call) {
-        currentPosition = Math.max(0L, call.getLong("currentTime", currentPosition));
-        currentDuration = Math.max(0L, call.getLong("totalTime", currentDuration));
+        currentPosition = readLong(call, "currentTime", currentPosition);
+        currentDuration = readLong(call, "totalTime", currentDuration);
+        updateSessionMetadata();
         updatePlaybackState();
         refreshNotification();
         call.resolve();
@@ -282,7 +285,7 @@ public class AndroidMediaBridgePlugin extends Plugin {
         float speed = currentPlaying ? currentPlaybackRate : 0F;
         PlaybackStateCompat.Builder builder = new PlaybackStateCompat.Builder()
                 .setActions(actions)
-                .setState(state, currentPosition, speed);
+                .setState(state, currentPosition, speed, SystemClock.elapsedRealtime());
         mediaSession.setPlaybackState(builder.build());
         mediaSession.setShuffleMode(
                 currentShuffling ? PlaybackStateCompat.SHUFFLE_MODE_ALL : PlaybackStateCompat.SHUFFLE_MODE_NONE
@@ -398,5 +401,19 @@ public class AndroidMediaBridgePlugin extends Plugin {
         } catch (IllegalArgumentException error) {
             return currentArtwork;
         }
+    }
+
+    private long readLong(PluginCall call, String key, long fallbackValue) {
+        Double value = call.getDouble(key);
+        if (value == null) {
+            Long longValue = call.getLong(key);
+            return longValue == null ? fallbackValue : Math.max(0L, longValue);
+        }
+        return Math.max(0L, Math.round(value));
+    }
+
+    private float readFloat(PluginCall call, String key, float fallbackValue) {
+        Float value = call.getFloat(key);
+        return value == null ? fallbackValue : value;
     }
 }
