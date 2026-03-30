@@ -42,6 +42,11 @@ pnpm exec tsx server/standalone/index.ts
 
 启动后默认监听 `http://0.0.0.0:25884`，健康检查地址是 `http://127.0.0.1:25884/healthz`。
 
+如果你本机 `25884` 端口跑的是桌面版内建服务，而不是 `server/standalone/`，现在同样也支持 `/healthz`。两者的区别主要看返回内容：
+
+- standalone 会返回 `mode: "standalone"`
+- Electron 内建服务会返回 `mode: "electron"`，并带上 `control: true`
+
 ## Docker 部署
 
 仓库里已经放了最小可用的 Docker 目录：

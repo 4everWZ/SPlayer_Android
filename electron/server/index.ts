@@ -29,6 +29,17 @@ const initAppServer = async () => {
       });
     }
     // 声明
+    server.get("/healthz", (_, reply) => {
+      reply.send({
+        code: 200,
+        message: "ok",
+        data: {
+          service: "SPlayer API",
+          mode: "electron",
+          control: true,
+        },
+      });
+    });
     server.get("/api", (_, reply) => {
       reply.send({
         name: "SPlayer API",
