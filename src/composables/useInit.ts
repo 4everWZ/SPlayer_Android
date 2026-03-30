@@ -1,4 +1,5 @@
 import { mediaSessionManager } from "@/core/player/MediaSessionManager";
+import { useAudioManager } from "@/core/player/AudioManager";
 import { usePlayerController } from "@/core/player/PlayerController";
 import { useDownloadManager } from "@/core/resource/DownloadManager";
 import { useDataStore, useSettingStore, useShortcutStore, useStatusStore } from "@/stores";
@@ -6,10 +7,13 @@ import { TASKBAR_IPC_CHANNELS } from "@/types/shared";
 import { isElectron, isMac } from "@/utils/env";
 import { printVersion } from "@/utils/log";
 import { openUserAgreement } from "@/utils/modal";
+import { isCapacitor } from "@/utils/platform";
 import {
   initAndroidBackButton,
   disposeAndroidBackButton,
 } from "@/composables/useAndroidBackButton";
+import { App } from "@capacitor/app";
+import type { PluginListenerHandle } from "@capacitor/core";
 import { useEventListener } from "@vueuse/core";
 import { debounce } from "lodash-es";
 import { onBeforeUnmount, onMounted, watch } from "vue";
@@ -29,13 +33,51 @@ export const useInit = () => {
 
   const player = usePlayerController();
   const downloadManager = useDownloadManager();
+  let appPauseListener: PluginListenerHandle | null = null;
+  let appResumeListener: PluginListenerHandle | null = null;
+  let appStateListener: PluginListenerHandle | null = null;
+  let backgroundPlaybackHealTimer: ReturnType<typeof setTimeout> | null = null;
 
   // 事件监听
   initEventListener();
 
+  const clearBackgroundPlaybackHealTimer = () => {
+    if (backgroundPlaybackHealTimer === null) return;
+    clearTimeout(backgroundPlaybackHealTimer);
+    backgroundPlaybackHealTimer = null;
+  };
+
+  const healBackgroundPlayback = async (reason: string, delay: number = 0) => {
+    if (!isCapacitor) return;
+    clearBackgroundPlaybackHealTimer();
+    backgroundPlaybackHealTimer = setTimeout(async () => {
+      const audioManager = useAudioManager();
+      if (!statusStore.playStatus) return;
+      try {
+        await audioManager.resume();
+        console.log(`🔄 息屏后尝试保持播放活跃: ${reason}`);
+      } catch (error) {
+        console.warn(`⚠️ 息屏后恢复播放失败: ${reason}`, error);
+      }
+    }, delay);
+  };
+
   onMounted(async () => {
     // 尽早接管 Android 返回键
     await initAndroidBackButton();
+    if (isCapacitor) {
+      appPauseListener = await App.addListener("pause", () => {
+        void healBackgroundPlayback("pause", 180);
+      });
+      appResumeListener = await App.addListener("resume", () => {
+        void healBackgroundPlayback("resume");
+      });
+      appStateListener = await App.addListener("appStateChange", ({ isActive }) => {
+        if (!isActive) {
+          void healBackgroundPlayback("appStateChange", 320);
+        }
+      });
+    }
     // 检查并执行设置迁移
     settingStore.checkAndMigrate();
     // 打印版本信息
@@ -111,6 +153,10 @@ export const useInit = () => {
   });
 
   onBeforeUnmount(() => {
+    clearBackgroundPlaybackHealTimer();
+    void appPauseListener?.remove();
+    void appResumeListener?.remove();
+    void appStateListener?.remove();
     void disposeAndroidBackButton();
   });
 };

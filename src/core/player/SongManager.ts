@@ -326,11 +326,12 @@ class SongManager {
     for (const r of results) {
       if (r.status === "fulfilled" && r.value.success) {
         const unlockUrl = r.value?.result?.url;
+        if (!unlockUrl) continue;
         // 解锁成功后，触发下载
         this.triggerCacheDownload(songId, unlockUrl);
         // 推断音质
         let quality = QualityType.HQ;
-        if (unlockUrl && (unlockUrl.includes(".flac") || unlockUrl.includes(".wav"))) {
+        if (unlockUrl.includes(".flac") || unlockUrl.includes(".wav")) {
           quality = QualityType.SQ;
         }
         console.log(`最终音质判断：详细输出：`, { unlockUrl, quality });
@@ -430,7 +431,7 @@ class SongManager {
       const songId = nextSong.type === "radio" ? nextSong.dj?.id : nextSong.id;
       if (!songId) return;
       // 是否可解锁
-      const canUnlock = isElectron && nextSong.type !== "radio" && settingStore.useSongUnlock;
+      const canUnlock = nextSong.type !== "radio" && settingStore.useSongUnlock;
       // 先请求官方地址
       const { url: officialUrl, isTrial, quality } = await this.getOnlineUrl(songId, false);
       if (officialUrl && !isTrial) {
@@ -531,7 +532,7 @@ class SongManager {
     // 在线获取
     try {
       // 是否可解锁
-      const canUnlock = isElectron && song.type !== "radio" && settingStore.useSongUnlock;
+      const canUnlock = song.type !== "radio" && settingStore.useSongUnlock;
 
       // 如果指定了非官方源，直接走解锁流程
       if (forceSource && forceSource !== "auto") {

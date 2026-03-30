@@ -4,6 +4,56 @@ import { SongUnlockServer } from "@/core/player/SongManager";
 import { useSettingStore } from "@/stores";
 import request from "@/utils/request";
 
+type UnlockSongUrlResponse = {
+  code?: number;
+  url?: string;
+  br?: number;
+  size?: number;
+  from?: string;
+};
+
+const DIRECT_NETEASE_UNLOCK_BASE_URL = "https://music-api.gdstudio.xyz";
+
+const resolveUnblockBaseUrl = () => {
+  const apiUrl = String(import.meta.env["VITE_API_URL"] || "/api/netease").trim();
+  if (!apiUrl.startsWith("http")) return "/api/unblock";
+
+  try {
+    const parsedUrl = new URL(apiUrl);
+    const normalizedPath = parsedUrl.pathname.replace(/\/+$/, "");
+    const unblockPath = normalizedPath.endsWith("/api/netease")
+      ? normalizedPath.replace(/\/api\/netease$/, "/api/unblock")
+      : "/api/unblock";
+    return `${parsedUrl.origin}${unblockPath}`;
+  } catch {
+    return "/api/unblock";
+  }
+};
+
+const requestDirectNeteaseUnlockSongUrl = async (id: number): Promise<UnlockSongUrlResponse> => {
+  const result = await request<UnlockSongUrlResponse>({
+    baseURL: DIRECT_NETEASE_UNLOCK_BASE_URL,
+    url: "/api.php",
+    params: {
+      types: "url",
+      id,
+      noCookie: true,
+    },
+    meta: {
+      silent: true,
+      dedupeKey: `unlock:netease:direct:${id}`,
+    },
+  });
+
+  return {
+    code: result?.url ? 200 : 404,
+    url: result?.url || undefined,
+    br: result?.br,
+    size: result?.size,
+    from: result?.from,
+  };
+};
+
 // 获取歌曲详情
 export const songDetail = (ids: number | number[]) => {
   return request({
@@ -63,7 +113,7 @@ export const songUrl = (
 };
 
 // 获取解锁歌曲 URL
-export const unlockSongUrl = (
+export const unlockSongUrl = async (
   id: number,
   keyword: string,
   server: SongUnlockServer,
@@ -71,11 +121,35 @@ export const unlockSongUrl = (
   artist?: string,
 ) => {
   const params = server === SongUnlockServer.NETEASE ? { id } : { keyword, songName, artist };
-  return request({
-    baseURL: "/api/unblock",
-    url: `/${server}`,
-    params: { ...params, noCookie: true },
-  });
+  try {
+    const result = await request<UnlockSongUrlResponse>({
+      baseURL: resolveUnblockBaseUrl(),
+      url: `/${server}`,
+      params: { ...params, noCookie: true },
+      meta: {
+        silent: true,
+        dedupeKey: `unlock:${server}:${id}`,
+      },
+    });
+
+    if (result?.url || server !== SongUnlockServer.NETEASE) {
+      return result;
+    }
+
+    return await requestDirectNeteaseUnlockSongUrl(id);
+  } catch (error) {
+    if (server === SongUnlockServer.NETEASE) {
+      try {
+        console.warn("⚠️ 解锁服务不可用，回退到直连网易云解锁源");
+        return await requestDirectNeteaseUnlockSongUrl(id);
+      } catch (fallbackError) {
+        console.warn("⚠️ 直连网易云解锁源失败", fallbackError);
+      }
+    } else {
+      console.warn(`⚠️ ${server} 解锁源请求失败`, error);
+    }
+    return { code: 404, url: undefined };
+  }
 };
 
 // 获取歌曲歌词

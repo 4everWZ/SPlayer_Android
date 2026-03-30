@@ -11,6 +11,7 @@ import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.os.Build;
+import android.os.PowerManager;
 import android.support.v4.media.MediaMetadataCompat;
 import android.support.v4.media.session.MediaSessionCompat;
 import android.support.v4.media.session.PlaybackStateCompat;
@@ -54,6 +55,7 @@ public class AndroidMediaBridgePlugin extends Plugin {
 
     private NotificationManagerCompat notificationManager;
     private MediaSessionCompat mediaSession;
+    private PowerManager.WakeLock playbackWakeLock;
 
     private String currentTitle = "";
     private String currentArtist = "";
@@ -71,6 +73,7 @@ public class AndroidMediaBridgePlugin extends Plugin {
         super.load();
         instance = this;
         notificationManager = NotificationManagerCompat.from(getContext());
+        initWakeLock();
         ensureNotificationChannel();
         initMediaSession();
     }
@@ -78,6 +81,7 @@ public class AndroidMediaBridgePlugin extends Plugin {
     @Override
     protected void handleOnDestroy() {
         super.handleOnDestroy();
+        releasePlaybackWakeLock();
         notificationManager.cancel(NOTIFICATION_ID);
         if (mediaSession != null) {
           mediaSession.release();
@@ -103,6 +107,7 @@ public class AndroidMediaBridgePlugin extends Plugin {
     @PluginMethod
     public void updatePlayState(PluginCall call) {
         currentPlaying = "Playing".equalsIgnoreCase(call.getString("status", "Paused"));
+        syncPlaybackWakeLock();
         updatePlaybackState();
         refreshNotification();
         call.resolve();
@@ -141,6 +146,38 @@ public class AndroidMediaBridgePlugin extends Plugin {
     public static void dispatchAction(String action) {
         if (instance == null || action == null) return;
         instance.handleExternalAction(action);
+    }
+
+    private void initWakeLock() {
+        PowerManager powerManager = getContext().getSystemService(PowerManager.class);
+        if (powerManager == null) return;
+        playbackWakeLock = powerManager.newWakeLock(
+                PowerManager.PARTIAL_WAKE_LOCK,
+                getContext().getPackageName() + ":playback"
+        );
+        playbackWakeLock.setReferenceCounted(false);
+    }
+
+    private void syncPlaybackWakeLock() {
+        if (playbackWakeLock == null) return;
+        try {
+            if (currentPlaying) {
+                if (!playbackWakeLock.isHeld()) {
+                    playbackWakeLock.acquire();
+                }
+            } else {
+                releasePlaybackWakeLock();
+            }
+        } catch (RuntimeException ignored) {
+        }
+    }
+
+    private void releasePlaybackWakeLock() {
+        if (playbackWakeLock == null || !playbackWakeLock.isHeld()) return;
+        try {
+            playbackWakeLock.release();
+        } catch (RuntimeException ignored) {
+        }
     }
 
     private void initMediaSession() {
