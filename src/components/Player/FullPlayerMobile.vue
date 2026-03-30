@@ -6,6 +6,11 @@
       <div class="btn" @click.stop="statusStore.showFullPlayer = false">
         <SvgIcon name="Down" :size="26" />
       </div>
+      <div class="top-title">
+        <div class="title text-hidden">{{ songTitle }}</div>
+        <div class="subtitle text-hidden">{{ artistName }}</div>
+      </div>
+      <div class="top-bar-placeholder"></div>
     </div>
 
     <!-- 主内容 -->
@@ -185,12 +190,25 @@ const hasLyric = computed(() => {
   return musicStore.isHasLrc && musicStore.playSong.type !== "radio";
 });
 
+const songTitle = computed(() => {
+  return settingStore.hideBracketedContent
+    ? removeBrackets(musicStore.playSong.name)
+    : musicStore.playSong.name || "未知曲目";
+});
+
 const artistName = computed(() => {
+  if (musicStore.playSong.type === "radio") {
+    return musicStore.playSong.dj?.creator || "播客电台";
+  }
   const artists = musicStore.playSong.artists;
   if (Array.isArray(artists)) {
-    return artists.map((ar) => ar.name).join(" / ");
+    return artists
+      .map((ar) => (settingStore.hideBracketedContent ? removeBrackets(ar.name) : ar.name))
+      .join(" / ");
   }
-  return (artists as string) || "未知艺术家";
+  return settingStore.hideBracketedContent
+    ? removeBrackets(artists as string)
+    : (artists as string) || "未知艺术家";
 });
 
 const openLyricPage = () => {
@@ -259,6 +277,7 @@ const contentTransform = computed(() => {
 
 <style lang="scss" scoped>
 .full-player-mobile {
+  --mobile-cover-size: min(76vw, 40vh);
   width: 100%;
   height: 100%;
   position: relative;
@@ -268,12 +287,13 @@ const contentTransform = computed(() => {
   .top-bar {
     position: absolute;
     width: 100%;
-    height: calc(60px + var(--safe-area-inset-top));
+    height: calc(72px + var(--safe-area-inset-top));
     flex-shrink: 0;
     display: flex;
     align-items: flex-end;
-    justify-content: flex-end;
-    padding: var(--safe-area-inset-top) 24px 0;
+    justify-content: space-between;
+    gap: 12px;
+    padding: var(--safe-area-inset-top) 20px 0;
     z-index: 10;
     .btn {
       width: 40px;
@@ -292,6 +312,32 @@ const contentTransform = computed(() => {
         color: rgb(var(--main-cover-color));
         opacity: 0.8;
       }
+    }
+    .top-title {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding-bottom: 4px;
+      .title {
+        max-width: 100%;
+        font-size: 17px;
+        font-weight: 700;
+        line-height: 1.3;
+      }
+      .subtitle {
+        max-width: 100%;
+        margin-top: 2px;
+        font-size: 12px;
+        opacity: 0.62;
+      }
+    }
+    .top-bar-placeholder {
+      width: 40px;
+      height: 40px;
+      flex-shrink: 0;
     }
   }
   .mobile-content {
@@ -313,47 +359,37 @@ const contentTransform = computed(() => {
       display: flex;
       flex-direction: column;
       align-items: center;
-      padding: 0 24px calc(40px + var(--safe-area-inset-bottom)) 24px;
-      overflow-y: auto;
+      padding: 0 20px calc(24px + var(--safe-area-inset-bottom)) 20px;
+      overflow: hidden;
       .cover-section {
-        flex: 1;
+        flex: 1 1 auto;
+        min-height: 0;
         width: 100%;
         display: flex;
         align-items: center;
         justify-content: center;
         flex-direction: column;
-        margin-top: calc(60px + var(--safe-area-inset-top));
-        margin-bottom: 20px;
+        margin-top: calc(76px + var(--safe-area-inset-top));
+        margin-bottom: 12px;
         &.clickable {
           cursor: pointer;
         }
         .cover-tip {
-          margin-top: 18px;
+          margin-top: 14px;
           font-size: 13px;
           opacity: 0.58;
           color: rgb(var(--main-cover-color));
         }
         :deep(.player-cover) {
-          width: min(100%, 45vh);
-          // height: min(85vw, 45vh);
+          width: var(--mobile-cover-size);
+          max-width: none;
           &.record {
-            width: 40vh;
+            width: var(--mobile-cover-size);
+            margin-bottom: 0;
             .cover-img {
-              width: 40vh;
-              height: 40vh;
-              min-width: 40vh;
-            }
-            .pointer {
-              width: 10vh;
-              top: -9.5vh;
-            }
-            @media (max-width: 512px) {
-              width: 36vh;
-              .cover-img {
-                width: 36vh;
-                height: 36vh;
-                min-width: 36vh;
-              }
+              width: var(--mobile-cover-size);
+              height: var(--mobile-cover-size);
+              min-width: 0;
             }
           }
         }
@@ -362,26 +398,42 @@ const contentTransform = computed(() => {
         width: 100%;
         display: flex;
         flex-direction: column;
+        flex-shrink: 0;
         .song-info-bar {
           width: 100%;
           display: flex;
           justify-content: space-between;
-          margin-bottom: 24px;
+          margin-bottom: 18px;
           .info-section {
             flex: 1;
             min-width: 0;
-            margin-right: 16px;
+            margin-right: 12px;
             :deep(.mobile-data) {
               width: 100%;
               max-width: 100%;
+              margin-top: 0;
+              padding: 0;
               .name {
                 margin-left: 0;
+                .name-text {
+                  font-size: 28px;
+                  line-height: 1.18;
+                }
+              }
+              .artists,
+              .album,
+              .dj {
+                font-size: 15px;
+              }
+              .alia {
+                margin: 4px 0;
+                font-size: 14px;
               }
             }
           }
           .info-actions {
             display: flex;
-            padding-top: 24px;
+            padding-top: 10px;
             gap: 16px;
             flex-shrink: 0;
             .action-btn {
@@ -413,7 +465,7 @@ const contentTransform = computed(() => {
         .progress-section {
           display: flex;
           align-items: center;
-          margin: 0 4px 30px;
+          margin: 0 0 20px;
           .time {
             font-size: 12px;
             opacity: 0.6;
@@ -429,7 +481,7 @@ const contentTransform = computed(() => {
         .control-section {
           width: 100%;
           max-width: 400px;
-          margin: 0 auto 30px;
+          margin: 0 auto;
           display: flex;
           align-items: center;
           justify-content: space-between;
@@ -560,7 +612,7 @@ const contentTransform = computed(() => {
   }
   .pagination {
     position: absolute;
-    bottom: calc(24px + var(--safe-area-inset-bottom));
+    bottom: calc(18px + var(--safe-area-inset-bottom));
     left: 0;
     width: 100%;
     display: flex;
@@ -579,6 +631,62 @@ const contentTransform = computed(() => {
         border-radius: 4px;
         opacity: 0.8;
       }
+    }
+  }
+  @media (max-height: 860px) {
+    --mobile-cover-size: min(72vw, 36vh);
+    .mobile-content {
+      .info-page {
+        .cover-section {
+          margin-bottom: 8px;
+        }
+        .info-group {
+          .song-info-bar {
+            margin-bottom: 14px;
+          }
+          .progress-section {
+            margin-bottom: 16px;
+          }
+        }
+      }
+    }
+  }
+  @media (max-height: 760px) {
+    --mobile-cover-size: min(66vw, 32vh);
+    .top-bar {
+      height: calc(64px + var(--safe-area-inset-top));
+    }
+    .mobile-content {
+      .info-page {
+        padding-bottom: calc(18px + var(--safe-area-inset-bottom));
+        .cover-section {
+          margin-top: calc(68px + var(--safe-area-inset-top));
+          .cover-tip {
+            margin-top: 10px;
+            font-size: 12px;
+          }
+        }
+        .info-group {
+          .song-info-bar {
+            margin-bottom: 10px;
+            .info-section {
+              :deep(.mobile-data) {
+                .name {
+                  .name-text {
+                    font-size: 24px;
+                  }
+                }
+              }
+            }
+          }
+          .progress-section {
+            margin-bottom: 12px;
+          }
+        }
+      }
+    }
+    .pagination {
+      bottom: calc(14px + var(--safe-area-inset-bottom));
     }
   }
 }
