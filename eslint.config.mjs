@@ -18,6 +18,8 @@ const compat = new FlatCompat({
 export default [
   {
     ignores: [
+      ".codex-worktrees/**",
+      "**/.codex-worktrees/**",
       "**/node_modules",
       "**/dist",
       "**/dist_mobile",
