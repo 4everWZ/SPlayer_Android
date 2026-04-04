@@ -31,6 +31,7 @@ type AppRequestInternalConfig = InternalAxiosRequestConfig & {
 
 const NETWORK_ERROR_COOLDOWN_MS = 6000;
 const networkErrorCache = new Map<string, number>();
+const MANUAL_COOKIE_KEYS = ["MUSIC_U", "__csrf", "NMTID"] as const;
 
 // 基础配置
 const server: AxiosInstance = axios.create({
@@ -79,6 +80,16 @@ const notifyNetworkError = (message: string, dedupeKey: string) => {
   window.$message?.warning(message);
 };
 
+const buildManualCookie = () => {
+  const cookieSegments = MANUAL_COOKIE_KEYS.map((key) => {
+    const value = getCookie(key);
+    return value ? `${key}=${value}` : "";
+  }).filter(Boolean);
+  if (!cookieSegments.length) return null;
+  cookieSegments.push("os=pc");
+  return cookieSegments.join(";");
+};
+
 // 请求拦截器
 server.interceptors.request.use(
   (request: AppRequestInternalConfig) => {
@@ -91,8 +102,10 @@ server.interceptors.request.use(
     if (!request.params) request.params = {};
     // Cookie
     if (!request.params.noCookie && (isLogin() || getCookie("MUSIC_U") !== null)) {
-      const cookie = `MUSIC_U=${getCookie("MUSIC_U")};os=pc;`;
-      request.params.cookie = cookie;
+      const cookie = buildManualCookie();
+      if (cookie) {
+        request.params.cookie = cookie;
+      }
     }
     // 自定义 realIP
     if (settingStore.useRealIP) {

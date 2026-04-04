@@ -37,6 +37,7 @@ export const useInit = () => {
   let appResumeListener: PluginListenerHandle | null = null;
   let appStateListener: PluginListenerHandle | null = null;
   let backgroundPlaybackHealTimer: ReturnType<typeof setTimeout> | null = null;
+  let visualViewportResizeHandler: (() => void) | null = null;
 
   // 事件监听
   initEventListener();
@@ -62,9 +63,27 @@ export const useInit = () => {
     }, delay);
   };
 
+  const syncVisualViewportHeight = () => {
+    if (typeof document === "undefined") return;
+    const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
+    document.documentElement.style.setProperty(
+      "--visual-viewport-height",
+      `${Math.round(viewportHeight)}px`,
+    );
+  };
+
   onMounted(async () => {
     // 尽早接管 Android 返回键
     await initAndroidBackButton();
+    syncVisualViewportHeight();
+    visualViewportResizeHandler = () => syncVisualViewportHeight();
+    window.addEventListener("resize", visualViewportResizeHandler, { passive: true });
+    window.visualViewport?.addEventListener("resize", visualViewportResizeHandler, {
+      passive: true,
+    });
+    window.visualViewport?.addEventListener("scroll", visualViewportResizeHandler, {
+      passive: true,
+    });
     if (isCapacitor) {
       appPauseListener = await App.addListener("pause", () => {
         void healBackgroundPlayback("pause", 180);
@@ -154,6 +173,11 @@ export const useInit = () => {
 
   onBeforeUnmount(() => {
     clearBackgroundPlaybackHealTimer();
+    if (visualViewportResizeHandler) {
+      window.removeEventListener("resize", visualViewportResizeHandler);
+      window.visualViewport?.removeEventListener("resize", visualViewportResizeHandler);
+      window.visualViewport?.removeEventListener("scroll", visualViewportResizeHandler);
+    }
     void appPauseListener?.remove();
     void appResumeListener?.remove();
     void appStateListener?.remove();

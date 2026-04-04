@@ -187,14 +187,17 @@ const { isSmallScreen } = useMobile();
 const setScrollbar = ref<InstanceType<typeof NScrollbar> | null>(null);
 
 // 移动端菜单显示状态
-const showLeftMenu = ref(true);
+const showLeftMenu = computed({
+  get: () => statusStore.settingSidebarOpen,
+  set: (value: boolean) => {
+    statusStore.settingSidebarOpen = value;
+  },
+});
 
 // 监听屏幕大小变化，非小屏时自动显示侧边栏
 watch(isSmallScreen, (small) => {
-  if (!small) {
-    showLeftMenu.value = true;
-  }
-});
+  showLeftMenu.value = !small;
+}, { immediate: true });
 
 // 菜单数据
 const activeKey = ref<SettingType>(props.type);

@@ -8,7 +8,12 @@
         <div class="title text-hidden">{{ songTitle }}</div>
         <div class="subtitle text-hidden">{{ artistName }}</div>
       </div>
-      <div class="top-bar-placeholder"></div>
+      <div v-if="panelMode === 'lyric'" class="top-actions">
+        <div class="top-action" @click.stop="openInfoPage">
+          返回封面
+        </div>
+      </div>
+      <div v-else class="top-bar-placeholder"></div>
     </div>
 
     <div class="mobile-body" @click.stop>
@@ -22,16 +27,8 @@
           </div>
 
           <div v-else key="lyric" class="lyric-stage">
-            <div :class="['lyric-header', { clickable: hasLyric }]" @click.stop="openInfoPage">
-              <s-image :src="musicStore.getSongCover('s')" class="lyric-cover" />
-              <div class="lyric-info">
-                <div class="name text-hidden">{{ songTitle }}</div>
-                <div class="artist text-hidden">{{ artistName }}</div>
-              </div>
-              <div class="lyric-header-tip">返回封面</div>
-            </div>
             <div class="lyric-main">
-              <PlayerLyric />
+              <PlayerLyric compact />
             </div>
           </div>
         </Transition>
@@ -327,6 +324,25 @@ watch(
       height: 40px;
       flex-shrink: 0;
     }
+
+    .top-actions {
+      min-width: 84px;
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      flex-shrink: 0;
+    }
+
+    .top-action {
+      opacity: 0.7;
+      cursor: pointer;
+      min-width: 52px;
+      height: 40px;
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      font-size: 12px;
+    }
   }
 
   .mobile-body {
@@ -389,60 +405,13 @@ watch(
   }
 
   .lyric-stage {
-    padding-top: 8px;
-  }
-
-  .lyric-header {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    padding: 6px 0 12px;
-    flex-shrink: 0;
-
-    &.clickable {
-      cursor: pointer;
-    }
-
-    .lyric-cover {
-      width: 48px;
-      height: 48px;
-      flex-shrink: 0;
-      border-radius: 10px;
-      overflow: hidden;
-
-      :deep(img) {
-        width: 100%;
-        height: 100%;
-        border-radius: 10px;
-      }
-    }
-
-    .lyric-info {
-      flex: 1;
-      min-width: 0;
-
-      .name {
-        font-size: 17px;
-        font-weight: 700;
-      }
-
-      .artist {
-        margin-top: 4px;
-        font-size: 13px;
-        opacity: 0.62;
-      }
-    }
-
-    .lyric-header-tip {
-      font-size: 12px;
-      opacity: 0.52;
-      flex-shrink: 0;
-    }
+    padding-top: 4px;
   }
 
   .lyric-main {
     flex: 1;
     min-height: 0;
+    padding-top: 2px;
   }
 
   .meta-stage {

@@ -16,8 +16,8 @@
           class="background-image"
           :style="{
             backgroundImage: `url(${statusStore.backgroundImageUrl})`,
-            transform: `scale(${statusStore.backgroundConfig.scale})`,
-            filter: `blur(${statusStore.backgroundConfig.blur}px)`,
+            transform: `scale(${backgroundScale})`,
+            filter: `blur(${backgroundBlur}px)`,
           }"
         />
         <video
@@ -29,8 +29,8 @@
           muted
           :style="{
             objectFit: 'cover',
-            transform: `scale(${statusStore.backgroundConfig.scale})`,
-            filter: `blur(${statusStore.backgroundConfig.blur}px)`,
+            transform: `scale(${backgroundScale})`,
+            filter: `blur(${backgroundBlur}px)`,
           }"
         />
         <div
@@ -127,6 +127,7 @@ import { useBlobURLManager } from "@/core/resource/BlobURLManager";
 import { isElectron } from "@/utils/env";
 import { useMobile } from "@/composables/useMobile";
 import { useInit } from "@/composables/useInit";
+import { isCapacitor } from "@/utils/platform";
 
 const musicStore = useMusicStore();
 const statusStore = useStatusStore();
@@ -142,6 +143,16 @@ const contentRef = ref<HTMLElement | null>(null);
 
 // 主内容高度
 const { height: contentHeight } = useElementSize(contentRef);
+const backgroundScale = computed(() =>
+  isCapacitor
+    ? Math.min(statusStore.backgroundConfig.scale ?? 1, 1.06)
+    : (statusStore.backgroundConfig.scale ?? 1),
+);
+const backgroundBlur = computed(() =>
+  isCapacitor
+    ? Math.min(statusStore.backgroundConfig.blur ?? 0, 6)
+    : (statusStore.backgroundConfig.blur ?? 0),
+);
 
 // 加载背景图
 const loadBackgroundImage = async () => {
@@ -182,7 +193,8 @@ onMounted(() => {
 <style lang="scss" scoped>
 #app-layout {
   width: 100%;
-  height: 100%;
+  height: var(--visual-viewport-height);
+  min-height: var(--visual-viewport-height);
   display: flex;
   flex-direction: column;
   position: relative;

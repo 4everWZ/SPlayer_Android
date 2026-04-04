@@ -1,5 +1,11 @@
 <template>
-  <div :class="['background', settingStore.playerBackgroundType]">
+  <div
+    :class="[
+      'background',
+      settingStore.playerBackgroundType,
+      { 'low-power-mobile': isCapacitor },
+    ]"
+  >
     <Transition name="fade" mode="out-in">
       <!-- 背景色 -->
       <div
@@ -23,7 +29,7 @@
         :flowSpeed="flowSpeed"
         :hasLyric="musicStore.isHasLrc"
         :lowFreqVolume="lowFreqVolume"
-        :renderScale="settingStore.playerBackgroundRenderScale ?? 0.5"
+        :renderScale="effectiveRenderScale"
       />
     </Transition>
   </div>
@@ -51,8 +57,13 @@ const shouldPauseBackgroundEffects = computed(
 const lowFreqVolume = ref(1.0);
 const effectiveBackgroundFps = computed(() =>
   isCapacitor
-    ? Math.min(settingStore.playerBackgroundFps ?? 60, 24)
+    ? Math.min(settingStore.playerBackgroundFps ?? 60, 8)
     : (settingStore.playerBackgroundFps ?? 60),
+);
+const effectiveRenderScale = computed(() =>
+  isCapacitor
+    ? Math.min(settingStore.playerBackgroundRenderScale ?? 0.5, 0.2)
+    : (settingStore.playerBackgroundRenderScale ?? 0.5),
 );
 
 const flowSpeed = computed(() => {
@@ -138,6 +149,18 @@ onBeforeUnmount(() => {
   &.animation {
     &::after {
       display: none;
+    }
+  }
+  &.low-power-mobile {
+    &::after {
+      background-color: rgba(0, 0, 0, 0.56);
+      backdrop-filter: none;
+    }
+    &.blur {
+      .bg-img {
+        transform: scale(1.08);
+        filter: blur(16px) contrast(1.02);
+      }
     }
   }
 }

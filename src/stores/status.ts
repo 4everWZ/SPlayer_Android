@@ -23,6 +23,10 @@ interface StatusState {
   networkDegraded: boolean;
   /** 连续网络失败次数 */
   networkFailureCount: number;
+  /** 移动端主菜单抽屉 */
+  mobileAsideOpen: boolean;
+  /** 设置侧边菜单 */
+  settingSidebarOpen: boolean;
   /** 上次返回键按下时间 */
   lastBackPressAt: number;
   /** 背景图 URL (Blob URL) */
@@ -196,6 +200,8 @@ export const useStatusStore = defineStore("status", {
     searchInputValue: "",
     networkDegraded: false,
     networkFailureCount: 0,
+    mobileAsideOpen: false,
+    settingSidebarOpen: false,
     lastBackPressAt: 0,
     backgroundImageUrl: null,
     showPlayBar: true,
@@ -378,6 +384,14 @@ export const useStatusStore = defineStore("status", {
     closeTopOverlay() {
       if (this.searchFocus) {
         this.searchFocus = false;
+        return true;
+      }
+      if (this.mobileAsideOpen) {
+        this.mobileAsideOpen = false;
+        return true;
+      }
+      if (this.settingSidebarOpen) {
+        this.settingSidebarOpen = false;
         return true;
       }
       if (this.playerSongMenuOpen) {

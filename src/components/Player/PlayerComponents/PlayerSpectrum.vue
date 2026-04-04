@@ -15,10 +15,25 @@ const props = defineProps<{
 }>();
 
 const player = usePlayerController();
+const canvasSize = reactive({
+  width: 0,
+  height: 0,
+});
 
 // canvas
 const canvasRef = ref<HTMLCanvasElement | null>(null);
 const isKeepDrawing = ref<boolean>(true);
+
+const updateCanvasSize = () => {
+  if (!canvasRef.value) return;
+  const nextWidth = document.body.clientWidth >= 1600 ? 1600 : document.body.clientWidth;
+  const nextHeight = props.height || 80;
+  if (canvasSize.width === nextWidth && canvasSize.height === nextHeight) return;
+  canvasSize.width = nextWidth;
+  canvasSize.height = nextHeight;
+  canvasRef.value.width = nextWidth;
+  canvasRef.value.height = nextHeight;
+};
 
 /**
  * 绘制音乐频谱图
@@ -30,15 +45,12 @@ const drawSpectrum = () => {
   // 转换为普通数组并处理
   const data = Array.from(spectrumData).slice(10);
   if (!isKeepDrawing.value || !canvasRef.value) return;
-  // 设置画布宽度，最大为 1600
-  canvasRef.value.width = document.body.clientWidth >= 1600 ? 1600 : document.body.clientWidth;
-  // 设置画布高度
-  canvasRef.value.height = props.height || 80;
+  updateCanvasSize();
   // 获取2D上下文
   const ctx: CanvasRenderingContext2D | null = canvasRef.value.getContext("2d");
   // 画布宽高
-  const canvasWidth = canvasRef.value.width;
-  const canvasHeight = canvasRef.value.height;
+  const canvasWidth = canvasSize.width;
+  const canvasHeight = canvasSize.height;
   // 频谱数量
   const numBars = data.length / 2.5;
   // 圆角半径
@@ -101,6 +113,7 @@ const roundRect = (
 // 开始绘制频谱
 const { pause: pauseDraw, resume: resumeDraw } = useRafFn(
   () => {
+    if (!props.show) return;
     drawSpectrum();
   },
   { immediate: false },
@@ -108,12 +121,24 @@ const { pause: pauseDraw, resume: resumeDraw } = useRafFn(
 
 onMounted(() => {
   isKeepDrawing.value = true;
+  updateCanvasSize();
+  window.addEventListener("resize", updateCanvasSize);
   resumeDraw();
 });
+
+watch(
+  () => props.show,
+  (show) => {
+    if (show) resumeDraw();
+    else pauseDraw();
+  },
+  { immediate: true },
+);
 
 onBeforeUnmount(() => {
   isKeepDrawing.value = false;
   pauseDraw();
+  window.removeEventListener("resize", updateCanvasSize);
 });
 </script>
 

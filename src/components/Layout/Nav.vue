@@ -179,7 +179,12 @@ const useBorderless = ref(true);
 // 当前窗口状态
 const isMax = ref(false);
 // 是否显示侧边栏
-const showAside = ref(false);
+const showAside = computed({
+  get: () => statusStore.mobileAsideOpen,
+  set: (value: boolean) => {
+    statusStore.mobileAsideOpen = value;
+  },
+});
 
 // 最小化
 const min = () => window.electron.ipcRenderer.send("win-min");
@@ -366,12 +371,16 @@ onMounted(async () => {
   font-size: 16px;
 }
 .aside-logo {
+  gap: 10px;
   .n-text {
-    width: 90px;
+    flex: 0 0 auto;
+    width: auto;
+    max-width: 140px;
     font-size: 22px;
     font-family: "logo";
     margin-top: 2px;
     line-height: 40px;
+    white-space: nowrap;
   }
 }
 .checkbox {

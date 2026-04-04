@@ -2,15 +2,9 @@
   <div
     :key="`lyric-${musicStore.playSong.id}`"
     :style="{
-      '--lrc-size': getFontSize(settingStore.lyricFontSize, settingStore.lyricFontSizeMode),
-      '--lrc-tran-size': getFontSize(
-        settingStore.lyricTranFontSize,
-        settingStore.lyricFontSizeMode,
-      ),
-      '--lrc-roma-size': getFontSize(
-        settingStore.lyricRomaFontSize,
-        settingStore.lyricFontSizeMode,
-      ),
+      '--lrc-size': lyricFontVars.primary,
+      '--lrc-tran-size': lyricFontVars.translated,
+      '--lrc-roma-size': lyricFontVars.roman,
       '--lrc-bold': settingStore.lyricFontWeight,
       '--lrc-left-padding': `${settingStore.lyricHorizontalOffset}px`,
       'font-family': settingStore.LyricFont !== 'follow' ? settingStore.LyricFont : '',
@@ -26,6 +20,7 @@
         pure: statusStore.pureLyricMode,
         'align-right': settingStore.lyricAlignRight,
         'meta-show': statusStore.playerMetaShow,
+        'compact-mobile': props.compact,
       },
     ]"
     @mouseleave="lrcAllLeave"
@@ -150,6 +145,10 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  compact: {
+    type: Boolean,
+    default: false,
+  },
 });
 
 const musicStore = useMusicStore();
@@ -158,6 +157,55 @@ const settingStore = useSettingStore();
 const player = usePlayerController();
 
 const lyricScrollContainer = ref<HTMLElement | null>(null);
+
+const buildCompactFontSize = (
+  size: number,
+  mode: string,
+  scale: number,
+  minSize: number,
+  maxSize: number,
+) => {
+  if (mode === "adaptive") {
+    return `clamp(${minSize}px, calc(${size} / 1080 * 100dvh * ${scale}), ${maxSize}px)`;
+  }
+  return `${Math.min(maxSize, Math.max(minSize, size * scale))}px`;
+};
+
+const lyricFontVars = computed(() => {
+  const primary = getFontSize(settingStore.lyricFontSize, settingStore.lyricFontSizeMode);
+  const translated = getFontSize(settingStore.lyricTranFontSize, settingStore.lyricFontSizeMode);
+  const roman = getFontSize(settingStore.lyricRomaFontSize, settingStore.lyricFontSizeMode);
+  if (!props.compact) {
+    return {
+      primary,
+      translated,
+      roman,
+    };
+  }
+  return {
+    primary: buildCompactFontSize(
+      settingStore.lyricFontSize,
+      settingStore.lyricFontSizeMode,
+      0.56,
+      18,
+      28,
+    ),
+    translated: buildCompactFontSize(
+      settingStore.lyricTranFontSize,
+      settingStore.lyricFontSizeMode,
+      0.62,
+      11,
+      16,
+    ),
+    roman: buildCompactFontSize(
+      settingStore.lyricRomaFontSize,
+      settingStore.lyricFontSizeMode,
+      0.62,
+      10,
+      15,
+    ),
+  };
+});
 
 // 是否为逐字歌词模式
 const isYrcMode = computed(() => settingStore.showWordLyrics && musicStore.isHasYrc);
@@ -492,7 +540,7 @@ const getLyricLineClass = (item: ProcessedLyricItem, index: number) => {
 const getLyricLineStyle = (item: ProcessedLyricItem, index: number) => {
   if (item.type !== "lyric") return {};
 
-  if (!settingStore.lyricsBlur) return { filter: "blur(0)" };
+  if (!settingStore.lyricsBlur || props.compact) return { filter: "blur(0)" };
   // 计算模糊程度
   const activeIdx = firstActiveIndex.value;
   const isOn = isLineActive(index);
@@ -590,6 +638,51 @@ onBeforeUnmount(() => {
     &:last-child {
       height: 0;
       padding-top: 100%;
+    }
+  }
+  &.compact-mobile {
+    .lyric-scroll-container {
+      padding-right: 8px;
+    }
+    .placeholder {
+      &:first-child {
+        height: 180px;
+      }
+      &:last-child {
+        padding-top: 52%;
+      }
+    }
+    .countdown-line {
+      margin: 2px 0;
+      min-height: 36px;
+      padding: 6px 10px;
+      .count-down {
+        .point {
+          width: 18px;
+          height: 18px;
+          margin-right: 8px;
+        }
+      }
+    }
+    .lrc-line {
+      margin: 2px 0;
+      padding: 4px 8px;
+      transform: scale(0.98);
+      .content {
+        line-height: 1.18;
+      }
+      .tran {
+        margin-top: 3px;
+      }
+      .roma {
+        margin-top: 1px;
+      }
+      &.is-yrc {
+        &.is-bg {
+          transform: scale(0.82);
+          padding: 0 10px;
+        }
+      }
     }
   }
   .lyric-content {

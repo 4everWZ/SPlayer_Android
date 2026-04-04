@@ -2,7 +2,12 @@
   <div class="player-lyric">
     <!-- 歌词内容 -->
     <AMLyric v-if="settingStore.useAMLyrics" :currentTime="playSeek" :playing="lyricPlaying" />
-    <DefaultLyric v-else :currentTime="playSeek" :playing="lyricPlaying" />
+    <DefaultLyric
+      v-else
+      :compact="props.compact"
+      :currentTime="playSeek"
+      :playing="lyricPlaying"
+    />
     <!-- 歌词菜单 -->
     <n-flex :class="['lyric-menu', { show: statusStore.playerMetaShow }]" justify="center" vertical>
       <div
@@ -93,6 +98,16 @@
 import { usePlayerController } from "@/core/player/PlayerController";
 import { useMusicStore, useSettingStore, useStatusStore } from "@/stores";
 import { openSetting, openCopyLyrics } from "@/utils/modal";
+import { isCapacitor } from "@/utils/platform";
+
+const props = withDefaults(
+  defineProps<{
+    compact?: boolean;
+  }>(),
+  {
+    compact: false,
+  },
+);
 
 const musicStore = useMusicStore();
 const settingStore = useSettingStore();
@@ -116,10 +131,14 @@ const currentSongId = computed(() => musicStore.playSong?.id as number | undefin
 const playSeek = ref<number>(player.getSeek() + statusStore.getSongOffset(musicStore.playSong?.id));
 
 // 实时更新播放进度
-const { pause: pauseSeek, resume: resumeSeek } = useRafFn(() => {
+const syncPlaySeek = () => {
   const songId = musicStore.playSong?.id;
   const offsetTime = statusStore.getSongOffset(songId);
   playSeek.value = player.getSeek() + offsetTime;
+};
+
+const { pause: pauseSeek, resume: resumeSeek } = useRafFn(syncPlaySeek, {
+  fpsLimit: isCapacitor ? (props.compact ? 18 : 20) : (props.compact ? 24 : undefined),
 });
 
 /**

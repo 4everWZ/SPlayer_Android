@@ -144,7 +144,10 @@ onMounted(() => {
     transition-delay: 0.25s;
   }
   :deep(.scrollbar) {
-    max-height: calc(100dvh - 160px - var(--safe-area-inset-top) - var(--safe-area-inset-bottom));
+    max-height: calc(
+      var(--visual-viewport-height) - 160px - var(--safe-area-inset-top) -
+        var(--safe-area-inset-bottom)
+    );
     .n-scrollbar-content {
       padding: 10px;
     }
@@ -152,6 +155,12 @@ onMounted(() => {
   @media (max-width: 768px) {
     width: 100%;
     max-width: calc(100vw - 24px);
+    max-height: calc(
+      var(--visual-viewport-height) - 112px - var(--safe-area-inset-top) -
+        var(--safe-area-inset-bottom)
+    );
+    background: rgba(240, 240, 240, 0.96);
+    border: 1px solid rgba(0, 0, 0, 0.06);
   }
   .title {
     display: flex;

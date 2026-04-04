@@ -1,7 +1,10 @@
 package top.imsyy.splayer;
 
+import android.graphics.Color;
+import android.graphics.drawable.ColorDrawable;
 import android.os.Bundle;
 import android.view.View;
+import android.webkit.WebSettings;
 import android.webkit.WebView;
 
 import androidx.core.graphics.Insets;
@@ -17,6 +20,7 @@ public class MainActivity extends BridgeActivity {
     protected void onCreate(Bundle savedInstanceState) {
         registerPlugin(AndroidMediaBridgePlugin.class);
         super.onCreate(savedInstanceState);
+        configureWebView();
         initSafeAreaInsetsSync();
     }
 
@@ -52,6 +56,22 @@ public class MainActivity extends BridgeActivity {
         if (windowInsets != null) {
             syncSafeAreaInsets(windowInsets);
         }
+    }
+
+    private void configureWebView() {
+        if (bridge == null) {
+            return;
+        }
+        final WebView webView = bridge.getWebView();
+        if (webView == null) {
+            return;
+        }
+        final WebSettings settings = webView.getSettings();
+        settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
+        getWindow().setBackgroundDrawable(new ColorDrawable(Color.BLACK));
+        getWindow().getDecorView().setBackgroundColor(Color.BLACK);
+        webView.setBackgroundColor(Color.BLACK);
+        webView.getRootView().setBackgroundColor(Color.BLACK);
     }
 
     private void syncSafeAreaInsets(WindowInsetsCompat windowInsets) {

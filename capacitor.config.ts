@@ -15,9 +15,9 @@ const config: CapacitorConfig = {
       enabled: true,
     },
     Keyboard: {
-      // 键盘弹出时调整 WebView 大小而非推送整个内容
-      resize: "body",
-      resizeOnFullScreen: true,
+      // 保持系统正常 resize，避免全屏模式下被插件二次裁切
+      resize: "native",
+      resizeOnFullScreen: false,
     },
   },
 };

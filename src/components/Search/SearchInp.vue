@@ -20,9 +20,15 @@
       </template>
     </n-input>
     <!-- 搜索框遮罩 -->
-    <Transition name="fade" mode="out-in">
-      <div v-show="statusStore.searchFocus" class="search-mask" @click.stop="closeSearchFocus" />
-    </Transition>
+    <Teleport to="body">
+      <Transition name="fade" mode="out-in">
+        <div
+          v-show="statusStore.searchFocus"
+          class="search-mask"
+          @click.stop="closeSearchFocus"
+        />
+      </Transition>
+    </Teleport>
     <!-- 默认内容 -->
     <SearchDefault v-if="settingStore.useOnlineService" @to-search="toSearch" />
     <!-- 搜索结果 -->
@@ -248,6 +254,20 @@ onMounted(() => {
     max-width: calc(100vw - 136px);
     .search-input {
       width: 100%;
+      :deep(.n-input-wrapper) {
+        background-color: rgba(255, 255, 255, 0.98) !important;
+      }
+      :deep(.n-input__input-el),
+      :deep(input) {
+        color: rgba(24, 24, 28, 0.92) !important;
+        caret-color: rgba(24, 24, 28, 0.92);
+      }
+      :deep(.n-input__placeholder) {
+        color: rgba(24, 24, 28, 0.4) !important;
+      }
+      :deep(.n-base-icon) {
+        color: rgba(24, 24, 28, 0.42) !important;
+      }
     }
     &.focus {
       width: 100%;
@@ -268,6 +288,12 @@ onMounted(() => {
     background-color: #00000040;
     backdrop-filter: blur(20px);
     -webkit-app-region: no-drag;
+  }
+  @media (max-width: 768px) {
+    .search-mask {
+      background-color: rgba(8, 10, 14, 0.82);
+      backdrop-filter: none;
+    }
   }
 }
 </style>
