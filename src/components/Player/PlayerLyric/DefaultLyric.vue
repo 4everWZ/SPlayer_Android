@@ -49,7 +49,7 @@
               v-if="item.type === 'countdown'"
               class="countdown-line"
               :style="{
-                animationPlayState: statusStore.playStatus ? 'running' : 'paused',
+                animationPlayState: props.playing ? 'running' : 'paused',
               }"
             >
               <Transition name="fade" mode="out-in">
@@ -145,6 +145,10 @@ const props = defineProps({
   currentTime: {
     type: Number,
     default: 0,
+  },
+  playing: {
+    type: Boolean,
+    default: false,
   },
 });
 

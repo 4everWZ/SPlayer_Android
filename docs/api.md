@@ -2,12 +2,15 @@
 
 ## 概述
 
-本软件提供了本地 HTTP API 服务，用于控制播放器和访问音乐服务。默认端口为 `25884`
+本软件提供两类 HTTP API 入口：
+
+- 本地桌面 / standalone 服务：默认端口 `25884`
+- 服务器反代入口：推荐统一挂在 `/splayer/*`
 
 ## 基础信息
 
-- **基础 URL**: `http://localhost:25884`
-- **API 前缀**: `/api`
+- **本地基础 URL**: `http://localhost:25884/api`
+- **服务器基础 URL 示例**: `http://192.9.181.26/splayer`
 - **响应格式**: JSON
 
 ## 统一响应格式
@@ -31,7 +34,7 @@
 
 ## 播放控制接口 (Control API)
 
-**基础路径**: `/api/control`
+**基础路径**: `http://localhost:25884/api/control`
 
 > [!WARNING]
 > 这一组接口依赖 Electron 桌面主进程里的 `mainWindow` 和 IPC 通道，不能像普通云端 API 一样独立部署到单独服务器。
@@ -213,7 +216,10 @@
 
 ## 云音乐 API (Netease API)
 
-**基础路径**: `/api/netease`
+**基础路径**:
+
+- 本地 standalone：`http://localhost:25884/api/netease`
+- 服务器反代：`<你的 VITE_API_ROOT>/netease`
 
 ### 使用说明
 
@@ -221,9 +227,9 @@
 
 **示例**:
 
-- `GET /api/netease/login/cellphone?phone=xxx&password=xxx`
-- `GET /api/netease/user/playlist?uid=xxx`
-- `GET /api/netease/song/detail?ids=xxx`
+- `GET <API_ROOT>/netease/login/cellphone?phone=xxx&password=xxx`
+- `GET <API_ROOT>/netease/user/playlist?uid=xxx`
+- `GET <API_ROOT>/netease/song/detail?ids=xxx`
 
 更多接口请参考 [NeteaseCloudMusicApi Enhanced 文档](https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced)
 
@@ -231,11 +237,14 @@
 
 ## 解锁 API (Unblock API)
 
-**基础路径**: `/api/unblock`
+**基础路径**:
+
+- 本地 standalone：`http://localhost:25884/api/unblock`
+- 服务器反代：`<你的 VITE_API_ROOT>/unblock`
 
 ### 云音乐解锁
 
-**接口**: `GET /api/unblock/netease?id={songId}`
+**接口**: `GET <API_ROOT>/unblock/netease?id={songId}`
 
 **描述**: 获取网易云音乐解锁后的播放链接
 
@@ -256,7 +265,7 @@
 
 ### 酷我解锁
 
-**接口**: `GET /api/unblock/kuwo?keyword={keyword}`
+**接口**: `GET <API_ROOT>/unblock/kuwo?keyword={keyword}`
 
 **描述**: 获取酷我音乐解锁后的播放链接
 
@@ -279,7 +288,7 @@
 
 ### 波点解锁
 
-**接口**: `GET /api/unblock/bodian?keyword={keyword}`
+**接口**: `GET <API_ROOT>/unblock/bodian?keyword={keyword}`
 
 **描述**: 获取波点音乐解锁后的播放链接
 
@@ -302,7 +311,28 @@
 
 ### 歌曲宝解锁
 
-**接口**: `GET /api/unblock/gequbao?keyword={keyword}`
+**接口**: `GET <API_ROOT>/unblock/gequbao?keyword={keyword}`
+
+---
+
+## QQ 音乐 API
+
+**基础路径**:
+
+- 本地 standalone：`http://localhost:25884/api/qqmusic`
+- 服务器反代：`<你的 VITE_API_ROOT>/qqmusic`
+
+### 逐字歌词
+
+**接口**: `GET <API_ROOT>/qqmusic/lyric?id={songId}`
+
+### 搜索
+
+**接口**: `GET <API_ROOT>/qqmusic/search?keyword={keyword}`
+
+### 模糊匹配
+
+**接口**: `GET <API_ROOT>/qqmusic/match?keyword={keyword}`
 
 **描述**: 获取歌曲宝解锁后的播放链接
 
@@ -344,6 +374,10 @@
     {
       "name": "UnblockAPI",
       "url": "/api/unblock"
+    },
+    {
+      "name": "QQMusicAPI",
+      "url": "/api/qqmusic"
     }
   ]
 }
@@ -421,12 +455,13 @@ print(response.json())
 
 ## 注意事项
 
-1. 所有接口仅在应用程序运行时可用
+1. `control` 只在本地桌面进程运行时可用
 2. HTTP API 默认端口为 `25884`，可在环境变量 `VITE_SERVER_PORT` 中配置
 3. WebSocket API 默认端口为 `25885`，可在应用程序设置中修改
 4. 解锁接口仅供学习使用，请勿用于商业用途
 5. 网易云音乐 API 需要登录后才能使用部分功能
 6. 接口响应时间取决于网络状况和服务器负载
 7. WebSocket 连接支持心跳检测（PING/PONG），建议客户端定期发送心跳以保持连接
+8. Android `remote` 模式推荐把服务统一反代到 `/splayer/*`，例如：`/splayer/netease`
 
 ---

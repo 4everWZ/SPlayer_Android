@@ -433,7 +433,9 @@ public class AndroidMediaBridgePlugin extends Plugin {
     }
 
     private boolean isPlaybackLoading() {
-        return "Loading".equalsIgnoreCase(currentPlaybackStatus);
+        return "Loading".equalsIgnoreCase(currentPlaybackStatus)
+                || "Buffering".equalsIgnoreCase(currentPlaybackStatus)
+                || "Recovering".equalsIgnoreCase(currentPlaybackStatus);
     }
 
     private boolean isPlaybackActive() {

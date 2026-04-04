@@ -1,4 +1,4 @@
-# Android V1 实施异议与取舍记录
+# Android V1.5 实施异议与取舍记录
 
 ## 1. 不迁移原生音频引擎，只在现有播放链路上补原生媒体桥
 
@@ -83,3 +83,17 @@
 - 当前策略：继续保留 Web/JS 播放链路，只在 Android 原生媒体桥里持有 `PARTIAL_WAKE_LOCK`，并在应用进入 `pause / background / resume` 生命周期时对仍应保持播放的会话做一次恢复兜底。
 - 取舍边界：当前目标是修复“自然黑屏后马上暂停”这一类息屏中断，不承诺被系统彻底杀进程后的连续播放。
 - 后续扩展：如果后续仍有机型在深度省电模式下中断播放，再评估是否需要前台服务或原生播放服务。
+
+## 13. Android V1.5 补充取舍
+
+- **Original Spec/Idea:** `embedded` 模式在 APK 内完整覆盖当前 App 使用到的全部 `netease / unblock / qqmusic` 调用面，不再依赖远程 `/splayer/*`。
+- **Actual Implementation:** 本轮先完成 `ApiRuntime`、`ApiEndpointRegistry`、`build:mobile:remote`、`build:mobile:embedded` 与 CI 工作流接入；`embedded` 模式下未实现的 provider 会自动回退到远程 `/splayer/*`。
+- **Reasoning:** 先把模式切换、构建入口、运行时挂点和 CI 产物打通，能在不破坏现有可用性的前提下继续补齐 provider；如果在这一轮硬上全量内置接口，验证面会显著超出当前 Android 收口任务的风险预算。
+
+- **Original Spec/Idea:** 播放器稳定性修复应彻底避免“中途卡住但系统媒体进度继续走”的问题，并兼顾能效。
+- **Actual Implementation:** 现有 Web/JS 音频链路上新增了 `loading / buffering / recovering` 状态、卡流看门狗、`waiting` 恢复链和 Android 媒体时间轴冻结逻辑；缓冲和恢复阶段会暂停非必要背景动画与歌词刷新。
+- **Reasoning:** 这条路径能直接修正用户当前感知到的核心异常，同时不需要把 Android 版本整体迁移到原生音频服务；对 V1.5 来说，这是风险最低且可验证的稳定性增量。
+
+- **Original Spec/Idea:** 移动端全屏播放器应按网易云式单轴交互收口，评论与歌词不再通过左右手势切页。
+- **Actual Implementation:** 已移除左右滑页，改为点击唱片进入歌词、点击歌词头部回封面页；评论统一改为底部抽屉，播放队列继续保留底部抽屉。
+- **Reasoning:** 先消除当前最影响可用性的横向手势和评论缺失问题，再逐步打磨视觉节奏。直接做像素级视觉复刻会把当前任务从交互收口扩大成整页重设计，不符合本轮范围。

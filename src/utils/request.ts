@@ -5,18 +5,20 @@ import axios, {
   AxiosResponse,
   InternalAxiosRequestConfig,
 } from "axios";
-import { isDev } from "./env";
 import { useSettingStore, useStatusStore } from "@/stores";
 import { getCookie } from "./cookie";
 import { isLogin } from "./auth";
 import axiosRetry from "axios-retry";
 import { isCapacitor } from "./platform";
+import { apiEndpointRegistry, apiRuntime } from "@/api/runtime";
+import type { ApiServiceName } from "@/api/runtime";
 
 type RequestMeta = {
   silent?: boolean;
   userAction?: boolean;
   dedupeKey?: string;
   errorMessage?: string;
+  service?: ApiServiceName;
 };
 
 export type AppRequestConfig = AxiosRequestConfig & {
@@ -30,12 +32,8 @@ type AppRequestInternalConfig = InternalAxiosRequestConfig & {
 const NETWORK_ERROR_COOLDOWN_MS = 6000;
 const networkErrorCache = new Map<string, number>();
 
-// 全局地址
-const baseURL: string = String(isDev ? "/api/netease" : import.meta.env["VITE_API_URL"]);
-
 // 基础配置
 const server: AxiosInstance = axios.create({
-  baseURL,
   // 原生壳使用手动写入的 Cookie，避免因自建 API 的 CORS 头导致请求被拦截
   withCredentials: !isCapacitor,
   // 超时时间
@@ -51,11 +49,15 @@ axiosRetry(server, {
 const resolveRequestMeta = (config?: Partial<AppRequestConfig>): Required<RequestMeta> => {
   const method = String(config?.method || "get").toLowerCase();
   const userAction = config?.meta?.userAction ?? !["get", "head", "options"].includes(method);
+  const service = config?.meta?.service ?? "netease";
   return {
     silent: config?.meta?.silent ?? !userAction,
     userAction,
-    dedupeKey: config?.meta?.dedupeKey ?? `${method}:${config?.url || baseURL}`,
+    dedupeKey:
+      config?.meta?.dedupeKey ??
+      `${method}:${config?.url || apiEndpointRegistry.getServiceUrl(service)}`,
     errorMessage: config?.meta?.errorMessage ?? "网络请求超时，请检查网络连接",
+    service,
   };
 };
 
@@ -83,6 +85,9 @@ server.interceptors.request.use(
     // pinia
     const settingStore = useSettingStore();
     request.meta = resolveRequestMeta(request);
+    if (!request.baseURL) {
+      request.baseURL = apiEndpointRegistry.getServiceUrl(request.meta.service || "netease");
+    }
     if (!request.params) request.params = {};
     // Cookie
     if (!request.params.noCookie && (isLogin() || getCookie("MUSIC_U") !== null)) {
@@ -163,6 +168,10 @@ server.interceptors.response.use(
 
 // 请求
 const request = async <T = any>(config: AppRequestConfig): Promise<T> => {
+  const embeddedResult = await apiRuntime.request<T>(config);
+  if (embeddedResult.handled) {
+    return embeddedResult.data;
+  }
   // 返回请求数据
   const { data } = await server.request(config);
   return data as T;

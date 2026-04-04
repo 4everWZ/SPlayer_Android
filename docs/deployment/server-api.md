@@ -2,9 +2,8 @@
 
 这份部署方案只覆盖能在单独服务器上稳定运行的 API 层：
 
-- `/api/netease`
-- `/api/unblock`
-- `/api/qqmusic`
+- 对内服务前缀：`/api/netease`、`/api/unblock`、`/api/qqmusic`
+- 对外推荐前缀：`/splayer/netease`、`/splayer/unblock`、`/splayer/qqmusic`
 
 `/api/control` 依赖 Electron 桌面进程里的 `mainWindow`，本质上是本地桌面控制能力，不能像普通 HTTP 服务一样直接丢进云端容器独立运行。若一定要远程控制桌面播放器，需要保留桌面端常驻运行，或者额外做一个桌面代理层。
 
@@ -86,7 +85,7 @@ docker compose up -d
 - `api`：真正的 Fastify API 服务
 - `nginx`：对外统一反代入口
 
-外部访问仍然是 `http://你的服务器:25884/api/...`
+如果你按仓库当前 Android/Web 推荐方式接入，建议在 Nginx 上把对外入口统一收口到 `/splayer/*`，再反代到容器内部的 `/api/*`。
 
 ### GitHub Actions 自动构建
 
@@ -135,7 +134,8 @@ docker compose -f docker-compose.registry.yml up -d
 如果你只想把现有 API 容器挂到 Nginx 后面，核心配置就是：
 
 ```nginx
-location /api/ {
+location /splayer/ {
+  rewrite ^/splayer/(.*)$ /api/$1 break;
   proxy_pass http://api:25884;
   proxy_http_version 1.1;
   proxy_set_header Host $host;
@@ -146,6 +146,8 @@ location /api/ {
 ```
 
 如果你未来要把 HTTPS 也接上，只需要在 Nginx 外层再加一层证书和 `listen 443 ssl`，API 容器本身不需要改。
+
+当前 Android `remote` 模式默认假设 `VITE_API_ROOT` 指向的就是这个对外 `/splayer` 根路径。
 
 ## 取舍
 

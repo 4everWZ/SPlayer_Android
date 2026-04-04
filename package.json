@@ -37,7 +37,9 @@
     "docs:dev": "vitepress dev docs",
     "docs:build": "vitepress build docs",
     "docs:preview": "vitepress preview docs",
-    "build:mobile": "rimraf dist_mobile && pnpm typecheck:web && vite build -c vite.config.mobile.ts --mode mobile",
+    "build:mobile": "pnpm build:mobile:remote",
+    "build:mobile:remote": "tsx scripts/build-mobile.ts remote",
+    "build:mobile:embedded": "tsx scripts/build-mobile.ts embedded",
     "cap:sync": "cap sync android",
     "cap:open": "cap open android"
   },

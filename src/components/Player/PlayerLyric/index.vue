@@ -1,8 +1,8 @@
 <template>
   <div class="player-lyric">
     <!-- 歌词内容 -->
-    <AMLyric v-if="settingStore.useAMLyrics" :currentTime="playSeek" />
-    <DefaultLyric v-else :currentTime="playSeek" />
+    <AMLyric v-if="settingStore.useAMLyrics" :currentTime="playSeek" :playing="lyricPlaying" />
+    <DefaultLyric v-else :currentTime="playSeek" :playing="lyricPlaying" />
     <!-- 歌词菜单 -->
     <n-flex :class="['lyric-menu', { show: statusStore.playerMetaShow }]" justify="center" vertical>
       <div
@@ -99,6 +99,14 @@ const settingStore = useSettingStore();
 const statusStore = useStatusStore();
 const player = usePlayerController();
 
+const lyricPlaying = computed(
+  () =>
+    statusStore.playStatus &&
+    !statusStore.playLoading &&
+    !statusStore.playBuffering &&
+    !statusStore.playRecovering,
+);
+
 /**
  * 当前歌曲 id
  */
@@ -153,8 +161,22 @@ const resetOffset = () => {
 };
 
 onMounted(() => {
-  resumeSeek();
+  if (lyricPlaying.value) {
+    resumeSeek();
+  }
 });
+
+watch(
+  () => lyricPlaying.value,
+  (playing) => {
+    if (playing) {
+      resumeSeek();
+    } else {
+      pauseSeek();
+    }
+  },
+  { immediate: true },
+);
 
 onBeforeUnmount(() => {
   pauseSeek();

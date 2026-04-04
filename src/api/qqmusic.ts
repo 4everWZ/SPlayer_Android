@@ -31,9 +31,9 @@ export interface QQMusicMatchResponse {
  */
 export const qqMusicMatch = (keyword: string): Promise<QQMusicMatchResponse> => {
   return request({
-    baseURL: "/api/qqmusic",
     url: "/match",
     params: { keyword },
+    meta: { service: "qqmusic" },
   });
 };
 
@@ -45,9 +45,9 @@ export const qqMusicMatch = (keyword: string): Promise<QQMusicMatchResponse> => 
  */
 export const qqMusicSearch = (keyword: string, page = 1, pageSize = 20) => {
   return request({
-    baseURL: "/api/qqmusic",
     url: "/search",
     params: { keyword, page, pageSize },
+    meta: { service: "qqmusic" },
   });
 };
 
@@ -59,8 +59,8 @@ export const qqMusicSearch = (keyword: string, page = 1, pageSize = 20) => {
  */
 export const qqMusicLyric = (id: number, name?: string, artist?: string) => {
   return request({
-    baseURL: "/api/qqmusic",
     url: "/lyric",
     params: { id, name, artist },
+    meta: { service: "qqmusic" },
   });
 };

@@ -19,7 +19,7 @@
       <BackgroundRender
         v-else-if="settingStore.playerBackgroundType === 'animation'"
         :album="musicStore.songCover"
-        :fps="settingStore.playerBackgroundFps ?? 60"
+        :fps="effectiveBackgroundFps"
         :flowSpeed="flowSpeed"
         :hasLyric="musicStore.isHasLrc"
         :lowFreqVolume="lowFreqVolume"
@@ -32,17 +32,31 @@
 <script setup lang="ts">
 import { useMusicStore, useSettingStore, useStatusStore } from "@/stores";
 import { usePlayerController } from "@/core/player/PlayerController";
+import { isCapacitor } from "@/utils/platform";
 
 const musicStore = useMusicStore();
 const settingStore = useSettingStore();
 const statusStore = useStatusStore();
 const player = usePlayerController();
 
+const shouldPauseBackgroundEffects = computed(
+  () =>
+    !statusStore.playStatus ||
+    statusStore.playLoading ||
+    statusStore.playBuffering ||
+    statusStore.playRecovering,
+);
+
 // 低频音量
 const lowFreqVolume = ref(1.0);
+const effectiveBackgroundFps = computed(() =>
+  isCapacitor
+    ? Math.min(settingStore.playerBackgroundFps ?? 60, 24)
+    : (settingStore.playerBackgroundFps ?? 60),
+);
 
 const flowSpeed = computed(() => {
-  if (!statusStore.playStatus && settingStore.playerBackgroundPause) return 0;
+  if (shouldPauseBackgroundEffects.value && settingStore.playerBackgroundPause) return 0;
   else return settingStore.playerBackgroundFlowSpeed ?? 4;
 });
 
@@ -52,7 +66,7 @@ const { pause: pauseRaf, resume: resumeRaf } = useRafFn(
     if (
       settingStore.playerBackgroundLowFreqVolume &&
       settingStore.playerBackgroundType === "animation" &&
-      statusStore.playStatus
+      !shouldPauseBackgroundEffects.value
     ) {
       lowFreqVolume.value = player.getLowFrequencyVolume();
     }
@@ -65,11 +79,11 @@ watch(
   () => [
     settingStore.playerBackgroundLowFreqVolume,
     settingStore.playerBackgroundType,
-    statusStore.playStatus,
+    shouldPauseBackgroundEffects.value,
   ],
-  ([enabled, bgType, playing]) => {
+  ([enabled, bgType, shouldPause]) => {
     if (enabled && bgType === "animation") {
-      playing ? resumeRaf() : pauseRaf();
+      shouldPause ? pauseRaf() : resumeRaf();
     } else {
       pauseRaf();
       lowFreqVolume.value = 1.0;

@@ -23,6 +23,11 @@ import * as playerIpc from "./PlayerIpc";
 import { PlayModeManager } from "./PlayModeManager";
 import { useSongManager } from "./SongManager";
 
+const PLAYBACK_STALL_TIMEOUT_MS = 7000;
+const PLAYBACK_WATCHDOG_INTERVAL_MS = 2500;
+const PLAYBACK_NO_PROGRESS_LIMIT_MS = 9000;
+const PLAYBACK_PROGRESS_EPSILON_MS = 250;
+
 /**
  * 播放器核心类
  * 职责：负责音频生命周期管理、与 AudioManager 交互、调度 Store
@@ -57,6 +62,10 @@ class PlayerController {
   private rateResetTimer: ReturnType<typeof setTimeout> | undefined;
   /** 速率渐变动画帧 */
   private rateRampFrame: number | undefined;
+  /** 卡流恢复定时器 */
+  private stallRecoveryTimer: ReturnType<typeof setTimeout> | undefined;
+  /** 播放看门狗 */
+  private playbackWatchdogTimer: ReturnType<typeof setInterval> | undefined;
 
   constructor() {
     // 初始化 AudioManager（会根据设置自动选择引擎）
@@ -287,6 +296,9 @@ class PlayerController {
     try {
       // 立即停止当前播放 (除非是 Crossfade)
       statusStore.playLoading = true;
+      statusStore.playBuffering = false;
+      statusStore.playRecovering = false;
+      this.stopPlaybackRecoveryTimers();
       if (!options.crossfade) {
         audioManager.stop();
       }
@@ -654,6 +666,110 @@ class PlayerController {
   }
 
   /**
+   * 停止卡流恢复相关定时器
+   */
+  private stopPlaybackRecoveryTimers() {
+    if (this.stallRecoveryTimer) {
+      clearTimeout(this.stallRecoveryTimer);
+      this.stallRecoveryTimer = undefined;
+    }
+    if (this.playbackWatchdogTimer) {
+      clearInterval(this.playbackWatchdogTimer);
+      this.playbackWatchdogTimer = undefined;
+    }
+  }
+
+  /**
+   * 标记有效播放进度
+   */
+  private markStableProgress(position: number) {
+    const statusStore = useStatusStore();
+    statusStore.lastProgressAt = Date.now();
+    statusStore.lastStablePosition = position;
+    if (statusStore.playBuffering || statusStore.playRecovering) {
+      statusStore.playBuffering = false;
+      statusStore.playRecovering = false;
+      mediaSessionManager.updateBufferingStatus(false);
+    }
+  }
+
+  /**
+   * 启动播放看门狗
+   */
+  private startPlaybackWatchdog() {
+    const statusStore = useStatusStore();
+    const audioManager = useAudioManager();
+    this.stopPlaybackRecoveryTimers();
+    this.playbackWatchdogTimer = setInterval(() => {
+      if (
+        !statusStore.playStatus ||
+        statusStore.playLoading ||
+        statusStore.playRecovering ||
+        audioManager.paused
+      ) {
+        return;
+      }
+      const now = Date.now();
+      const currentSeek = this.getSeek();
+      const lastProgressAt = statusStore.lastProgressAt || 0;
+      const isNearEnd =
+        statusStore.duration > 0 && currentSeek >= Math.max(statusStore.duration - 1500, 0);
+      if (isNearEnd) return;
+      if (!lastProgressAt || now - lastProgressAt < PLAYBACK_NO_PROGRESS_LIMIT_MS) {
+        return;
+      }
+      if (Math.abs(currentSeek - statusStore.lastStablePosition) > PLAYBACK_PROGRESS_EPSILON_MS) {
+        this.markStableProgress(currentSeek);
+        return;
+      }
+      this.schedulePlaybackRecovery("watchdog");
+    }, PLAYBACK_WATCHDOG_INTERVAL_MS);
+  }
+
+  /**
+   * 安排卡流恢复
+   */
+  private schedulePlaybackRecovery(reason: "waiting" | "emptied" | "watchdog") {
+    const statusStore = useStatusStore();
+    const audioManager = useAudioManager();
+    if (
+      !statusStore.playStatus ||
+      statusStore.playLoading ||
+      statusStore.playRecovering ||
+      audioManager.paused
+    ) {
+      return;
+    }
+    statusStore.playBuffering = true;
+    mediaSessionManager.updateBufferingStatus(true);
+    if (this.stallRecoveryTimer) {
+      clearTimeout(this.stallRecoveryTimer);
+    }
+    this.stallRecoveryTimer = setTimeout(() => {
+      this.stallRecoveryTimer = undefined;
+      const now = Date.now();
+      const currentSeek = this.getSeek();
+      const noProgress =
+        now - statusStore.lastProgressAt >= PLAYBACK_STALL_TIMEOUT_MS &&
+        Math.abs(currentSeek - statusStore.lastStablePosition) <= PLAYBACK_PROGRESS_EPSILON_MS;
+      if (!statusStore.playStatus || audioManager.paused || !noProgress) {
+        if (statusStore.playBuffering && !statusStore.playRecovering) {
+          statusStore.playBuffering = false;
+          mediaSessionManager.updateBufferingStatus(false);
+        }
+        return;
+      }
+      statusStore.playRecovering = true;
+      console.warn(`⚠️ 检测到播放卡流，准备恢复: ${reason}`);
+      void this.handlePlaybackError(
+        AudioErrorCode.NETWORK,
+        statusStore.lastStablePosition || currentSeek,
+        this.currentAudioSource?.source,
+      );
+    }, PLAYBACK_STALL_TIMEOUT_MS);
+  }
+
+  /**
    * 统一音频事件绑定
    */
   private bindAudioEvents() {
@@ -667,6 +783,9 @@ class PlayerController {
     // 加载状态
     audioManager.addEventListener("loadstart", () => {
       statusStore.playLoading = true;
+      statusStore.playBuffering = false;
+      statusStore.playRecovering = false;
+      statusStore.lastProgressAt = Date.now();
       mediaSessionManager.updateLoadingStatus(true);
     });
 
@@ -675,6 +794,8 @@ class PlayerController {
       const playSongData = getPlaySongData();
       // 结束加载
       statusStore.playLoading = false;
+      statusStore.playRecovering = false;
+      this.markStableProgress(this.getSeek());
       mediaSessionManager.updateLoadingStatus(false);
       // 恢复 EQ
       if (isElectron && statusStore.eqEnabled) {
@@ -698,8 +819,12 @@ class PlayerController {
       const playTitle = `${name} - ${artist}`;
       // 更新状态
       statusStore.playStatus = true;
+      statusStore.playBuffering = false;
+      statusStore.playRecovering = false;
+      statusStore.lastProgressAt = Date.now();
       playerIpc.sendMediaPlayState("Playing");
       mediaSessionManager.updatePlaybackStatus(true);
+      this.startPlaybackWatchdog();
       window.document.title = `${playTitle} | SPlayer`;
       // 只有真正播放了才重置重试计数
       if (this.retryInfo.count > 0) {
@@ -725,8 +850,12 @@ class PlayerController {
     // 暂停
     audioManager.addEventListener("pause", () => {
       statusStore.playStatus = false;
+      statusStore.playBuffering = false;
+      statusStore.playRecovering = false;
+      this.stopPlaybackRecoveryTimers();
       useAutomixManager().resetAutomixScheduling("IDLE");
       playerIpc.sendMediaPlayState("Paused");
+      mediaSessionManager.updateBufferingStatus(false);
       mediaSessionManager.updatePlaybackStatus(false);
       if (!isElectron) window.document.title = "SPlayer";
       playerIpc.sendPlayStatus(false);
@@ -738,11 +867,39 @@ class PlayerController {
     });
     // 拖动进度条
     audioManager.addEventListener("seeking", () => {
+      statusStore.playBuffering = false;
+      statusStore.playRecovering = false;
+      if (this.stallRecoveryTimer) {
+        clearTimeout(this.stallRecoveryTimer);
+        this.stallRecoveryTimer = undefined;
+      }
       useAutomixManager().resetAutomixScheduling("MONITORING");
+    });
+    audioManager.addEventListener("seeked", () => {
+      this.markStableProgress(this.getSeek());
+      mediaSessionManager.updateState(this.getDuration(), this.getSeek(), true);
+    });
+    audioManager.addEventListener("playing", () => {
+      this.markStableProgress(this.getSeek());
+      if (!statusStore.playStatus) {
+        statusStore.playStatus = true;
+      }
+      this.startPlaybackWatchdog();
+      mediaSessionManager.updatePlaybackStatus(true);
+    });
+    audioManager.addEventListener("waiting", () => {
+      this.schedulePlaybackRecovery("waiting");
+    });
+    audioManager.addEventListener("emptied", () => {
+      this.schedulePlaybackRecovery("emptied");
     });
     // 播放结束
     audioManager.addEventListener("ended", () => {
       if (this.isTransitioning) return;
+      this.stopPlaybackRecoveryTimers();
+      statusStore.playBuffering = false;
+      statusStore.playRecovering = false;
+      mediaSessionManager.updateBufferingStatus(false);
       useAutomixManager().resetAutomixScheduling("IDLE");
       console.log(`⏹️ [${musicStore.playSong?.id}] 歌曲结束`);
       lastfmScrobbler.stop();
@@ -782,6 +939,12 @@ class PlayerController {
         progress: calculateProgress(currentTime, duration),
         lyricIndex,
       });
+      if (
+        Math.abs(currentTime - statusStore.lastStablePosition) >= PLAYBACK_PROGRESS_EPSILON_MS ||
+        !statusStore.lastProgressAt
+      ) {
+        this.markStableProgress(currentTime);
+      }
       // 成功播放一段距离后，重置失败跳过计数
       if (currentTime > 500 && this.failSkipCount > 0) {
         this.failSkipCount = 0;
@@ -821,6 +984,7 @@ class PlayerController {
     // 错误处理
     audioManager.addEventListener("error", (e) => {
       const errCode = e.detail.errorCode;
+      this.stopPlaybackRecoveryTimers();
       this.handlePlaybackError(errCode, this.getSeek(), this.currentAudioSource?.source);
     });
   }
@@ -843,6 +1007,8 @@ class PlayerController {
     const musicStore = useMusicStore();
     const statusStore = useStatusStore();
     const songManager = useSongManager();
+    this.stopPlaybackRecoveryTimers();
+    statusStore.playBuffering = false;
     // 清除预加载缓存
     songManager.clearPrefetch();
     // 当前歌曲 ID
@@ -858,8 +1024,10 @@ class PlayerController {
     const retryLimit = songManager.getRetryLimit(musicStore.playSong);
     // 用户主动中止
     if (errCode === AudioErrorCode.ABORTED || errCode === AudioErrorCode.DOM_ABORT) {
+      statusStore.playRecovering = false;
       this.retryInfo.count = 0;
       songManager.clearSourceFailures(currentSongId);
+      mediaSessionManager.updateBufferingStatus(false);
       return;
     }
     // 格式不支持
@@ -867,8 +1035,10 @@ class PlayerController {
       console.warn(`⚠️ 音频格式不支持 (Code: ${errCode}), 跳过`);
       window.$message.error("该歌曲无法播放，已自动跳过");
       statusStore.playLoading = false;
+      statusStore.playRecovering = false;
       this.retryInfo.count = 0;
       songManager.clearSourceFailures(currentSongId);
+      mediaSessionManager.updateBufferingStatus(false);
       await this.skipToNextWithDelay();
       return;
     }
@@ -877,8 +1047,10 @@ class PlayerController {
       console.error("❌ 本地文件加载失败");
       window.$message.error("本地文件无法播放");
       statusStore.playLoading = false;
+      statusStore.playRecovering = false;
       this.retryInfo.count = 0;
       songManager.clearSourceFailures(currentSongId);
+      mediaSessionManager.updateBufferingStatus(false);
       await this.skipToNextWithDelay();
       return;
     }
@@ -899,8 +1071,10 @@ class PlayerController {
     // 超过重试次数 -> 跳下一首
     console.error("❌ 超过最大重试次数，跳过当前歌曲");
     this.retryInfo.count = 0;
+    statusStore.playRecovering = false;
     songManager.clearSourceFailures(currentSongId);
     window.$message.error("播放失败，已自动跳过");
+    mediaSessionManager.updateBufferingStatus(false);
     await this.skipToNextWithDelay();
   }
 
@@ -1244,6 +1418,7 @@ class PlayerController {
     const audioManager = useAudioManager();
     const songManager = useSongManager();
     // 重置状态
+    this.stopPlaybackRecoveryTimers();
     audioManager.stop();
     statusStore.resetPlayStatus();
     musicStore.resetMusicData();

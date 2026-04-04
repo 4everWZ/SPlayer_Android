@@ -27,9 +27,16 @@ class MediaSessionManager {
   private currentRate: number = 1;
   private nativeMediaListener: PluginListenerHandle | null = null;
 
-  private resolveAndroidPlaybackStatus(isPlaying: boolean, isLoading: boolean) {
-    if (isLoading) return "Loading";
-    return isPlaying ? "Playing" : "Paused";
+  private resolveAndroidPlaybackStatus() {
+    const statusStore = useStatusStore();
+    if (statusStore.playLoading) return "Loading";
+    if (statusStore.playBuffering || statusStore.playRecovering) return "Buffering";
+    return statusStore.playStatus ? "Playing" : "Paused";
+  }
+
+  private syncAndroidPlaybackStatus() {
+    if (!androidMediaBridge.isSupported) return;
+    androidMediaBridge.updatePlayState(this.resolveAndroidPlaybackStatus());
   }
 
   private throttledSendTimeline = throttle((currentTime: number, duration: number) => {
@@ -159,9 +166,7 @@ class MediaSessionManager {
       );
       sendMediaPlaybackRate(statusStore.playRate);
       sendMediaVolume(statusStore.playVolume);
-      androidMediaBridge.updatePlayState(
-        this.resolveAndroidPlaybackStatus(statusStore.playStatus, statusStore.playLoading),
-      );
+      this.syncAndroidPlaybackStatus();
       return;
     }
 
@@ -325,10 +330,15 @@ class MediaSessionManager {
   public updateState(duration: number, position: number, immediate: boolean = false) {
     const settingStore = useSettingStore();
     if (!settingStore.smtcOpen) return;
+    const statusStore = useStatusStore();
 
     // 原生插件
     if (this.shouldUseNativeMedia()) {
-      if (androidMediaBridge.isSupported && useStatusStore().playLoading && !immediate) {
+      if (
+        androidMediaBridge.isSupported &&
+        (statusStore.playLoading || statusStore.playBuffering || statusStore.playRecovering) &&
+        !immediate
+      ) {
         return;
       }
       if (immediate) {
@@ -351,7 +361,7 @@ class MediaSessionManager {
   public updatePlaybackStatus(isPlaying: boolean) {
     // 发送到原生插件
     if (androidMediaBridge.isSupported) {
-      androidMediaBridge.updatePlayState(this.resolveAndroidPlaybackStatus(isPlaying, false));
+      this.syncAndroidPlaybackStatus();
       return;
     }
 
@@ -366,10 +376,23 @@ class MediaSessionManager {
   public updateLoadingStatus(isLoading: boolean) {
     if (!androidMediaBridge.isSupported) return;
     const statusStore = useStatusStore();
-    androidMediaBridge.updatePlayState(
-      this.resolveAndroidPlaybackStatus(statusStore.playStatus, isLoading),
-    );
+    statusStore.playLoading = isLoading;
+    this.syncAndroidPlaybackStatus();
     if (!isLoading) {
+      this.throttledSendTimeline.cancel();
+      sendMediaTimeline(statusStore.currentTime, statusStore.duration, true);
+    }
+  }
+
+  /**
+   * 更新缓冲状态
+   */
+  public updateBufferingStatus(isBuffering: boolean) {
+    if (!androidMediaBridge.isSupported) return;
+    const statusStore = useStatusStore();
+    statusStore.playBuffering = isBuffering;
+    this.syncAndroidPlaybackStatus();
+    if (!isBuffering) {
       this.throttledSendTimeline.cancel();
       sendMediaTimeline(statusStore.currentTime, statusStore.duration, true);
     }

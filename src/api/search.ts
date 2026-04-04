@@ -19,6 +19,12 @@ export enum SearchTypes {
 export const searchHot = () => {
   return request({
     url: "/search/hot/detail",
+    meta: {
+      service: "netease",
+      userAction: true,
+      silent: false,
+      dedupeKey: "search:hot",
+    },
   });
 };
 
@@ -30,6 +36,12 @@ export const searchSuggest = (keywords: string, mobile: boolean = false) => {
       keywords,
       ...(mobile && { type: "mobile" }),
     },
+    meta: {
+      service: "netease",
+      userAction: true,
+      silent: false,
+      dedupeKey: `search:suggest:${keywords}:${mobile ? "mobile" : "default"}`,
+    },
   });
 };
 
@@ -40,6 +52,12 @@ export const searchMultimatch = (keywords: string) => {
     params: {
       keywords,
     },
+    meta: {
+      service: "netease",
+      userAction: true,
+      silent: false,
+      dedupeKey: `search:multimatch:${keywords}`,
+    },
   });
 };
 
@@ -49,6 +67,12 @@ export const searchDefault = () => {
     url: "/search/default",
     params: {
       timestamp: Date.now(),
+    },
+    meta: {
+      service: "netease",
+      userAction: true,
+      silent: false,
+      dedupeKey: "search:default",
     },
   });
 };
@@ -67,6 +91,12 @@ export const searchResult = (
       limit,
       offset,
       type,
+    },
+    meta: {
+      service: "netease",
+      userAction: true,
+      silent: false,
+      dedupeKey: `search:result:${type}:${keywords}:${offset}:${limit}`,
     },
   });
 };

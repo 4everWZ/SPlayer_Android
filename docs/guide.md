@@ -52,9 +52,9 @@ docker run -d --name SPlayer -p 25884:25884 imsyy/splayer:latest
 
 这份方案只覆盖可独立运行的能力：
 
-- `/api/netease`
-- `/api/unblock`
-- `/api/qqmusic`
+- `/splayer/netease`
+- `/splayer/unblock`
+- `/splayer/qqmusic`
 
 `/api/control` 仍然依赖 Electron 桌面主进程，不属于纯服务端容器化范围。
 
@@ -64,7 +64,7 @@ docker run -d --name SPlayer -p 25884:25884 imsyy/splayer:latest
 2. Fork 本仓库到你的 GitHub 账号
 3. 复制 `/.env.example` 为 `/.env` 并配置：
    ```
-   VITE_API_URL = "https://your-api-url.com"
+   VITE_API_ROOT = "https://your-domain.com/splayer"
    ```
 4. 在 Vercel 导入项目
 5. 设置 `Output Directory` 为 `out/renderer`
@@ -164,17 +164,19 @@ pnpm dev
 
 ### 常用开发命令
 
-| 命令                | 说明                                 |
-| ------------------- | ------------------------------------ |
-| `pnpm dev`          | 启动开发服务器 (Electron + Vite HMR) |
-| `pnpm dev:web`      | 仅启动 Web 版开发服务器              |
-| `pnpm build`        | 构建 Web 版生产包                    |
-| `pnpm build:win`    | 构建 Windows 客户端                  |
-| `pnpm build:mac`    | 构建 macOS 客户端                    |
-| `pnpm build:linux`  | 构建 Linux 客户端                    |
-| `pnpm build:native` | 构建原生插件                         |
-| `pnpm lint`         | 运行代码检查                         |
-| `pnpm format`       | 格式化代码                           |
+| 命令                         | 说明                                 |
+| ---------------------------- | ------------------------------------ |
+| `pnpm dev`                   | 启动开发服务器 (Electron + Vite HMR) |
+| `pnpm dev:web`               | 仅启动 Web 版开发服务器              |
+| `pnpm build`                 | 构建 Web 版生产包                    |
+| `pnpm build:win`             | 构建 Windows 客户端                  |
+| `pnpm build:mac`             | 构建 macOS 客户端                    |
+| `pnpm build:linux`           | 构建 Linux 客户端                    |
+| `pnpm build:native`          | 构建原生插件                         |
+| `pnpm build:mobile:remote`   | 构建 Android 远程服务模式调试包资源  |
+| `pnpm build:mobile:embedded` | 构建 Android embedded 调试包资源     |
+| `pnpm lint`                  | 运行代码检查                         |
+| `pnpm format`                | 格式化代码                           |
 
 ### 构建客户端
 

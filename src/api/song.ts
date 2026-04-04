@@ -3,6 +3,7 @@ import { defaultAMLLDbServer, songLevelData } from "@/utils/meta";
 import { SongUnlockServer } from "@/core/player/SongManager";
 import { useSettingStore } from "@/stores";
 import request from "@/utils/request";
+import { apiEndpointRegistry } from "@/api/runtime";
 
 type UnlockSongUrlResponse = {
   code?: number;
@@ -13,22 +14,6 @@ type UnlockSongUrlResponse = {
 };
 
 const DIRECT_NETEASE_UNLOCK_BASE_URL = "https://music-api.gdstudio.xyz";
-
-const resolveUnblockBaseUrl = () => {
-  const apiUrl = String(import.meta.env["VITE_API_URL"] || "/api/netease").trim();
-  if (!apiUrl.startsWith("http")) return "/api/unblock";
-
-  try {
-    const parsedUrl = new URL(apiUrl);
-    const normalizedPath = parsedUrl.pathname.replace(/\/+$/, "");
-    const unblockPath = normalizedPath.endsWith("/api/netease")
-      ? normalizedPath.replace(/\/api\/netease$/, "/api/unblock")
-      : "/api/unblock";
-    return `${parsedUrl.origin}${unblockPath}`;
-  } catch {
-    return "/api/unblock";
-  }
-};
 
 const requestDirectNeteaseUnlockSongUrl = async (id: number): Promise<UnlockSongUrlResponse> => {
   const result = await request<UnlockSongUrlResponse>({
@@ -42,6 +27,7 @@ const requestDirectNeteaseUnlockSongUrl = async (id: number): Promise<UnlockSong
     meta: {
       silent: true,
       dedupeKey: `unlock:netease:direct:${id}`,
+      service: "netease",
     },
   });
 
@@ -61,6 +47,7 @@ export const songDetail = (ids: number | number[]) => {
     method: "post",
     params: { timestamp: Date.now() },
     data: { ids: Array.isArray(ids) ? ids.join(",") : ids.toString() },
+    meta: { service: "netease" },
   });
 };
 
@@ -72,6 +59,7 @@ export const songQuality = (id: number) => {
   return request({
     url: "/song/music/detail",
     params: { id },
+    meta: { service: "netease" },
   });
 };
 
@@ -99,6 +87,7 @@ export const songUrl = (
         immerseType: "c51",
         timestamp: Date.now(),
       },
+      meta: { service: "netease" },
     });
   }
 
@@ -109,6 +98,7 @@ export const songUrl = (
       level,
       timestamp: Date.now(),
     },
+    meta: { service: "netease" },
   });
 };
 
@@ -123,12 +113,13 @@ export const unlockSongUrl = async (
   const params = server === SongUnlockServer.NETEASE ? { id } : { keyword, songName, artist };
   try {
     const result = await request<UnlockSongUrlResponse>({
-      baseURL: resolveUnblockBaseUrl(),
+      baseURL: apiEndpointRegistry.unblock,
       url: `/${server}`,
       params: { ...params, noCookie: true },
       meta: {
         silent: true,
         dedupeKey: `unlock:${server}:${id}`,
+        service: "unblock",
       },
     });
 
@@ -159,6 +150,7 @@ export const songLyric = (id: number) => {
     params: {
       id,
     },
+    meta: { service: "netease" },
   });
 };
 
@@ -169,7 +161,11 @@ export const songLyric = (id: number) => {
  */
 export const songLyricTTML = async (id: number) => {
   if (isElectron) {
-    return request({ url: "/lyric/ttml", params: { id, noCookie: true } });
+    return request({
+      url: "/lyric/ttml",
+      params: { id, noCookie: true },
+      meta: { service: "netease" },
+    });
   } else {
     const settingStore = useSettingStore();
     const server = settingStore.amllDbServer || defaultAMLLDbServer;
@@ -199,6 +195,7 @@ export const songDownloadUrl = (id: number, level: keyof typeof songLevelData = 
   return request({
     url: "/song/download/url/v1",
     params: { id, level: levelName, timestamp: Date.now() },
+    meta: { service: "netease" },
   });
 };
 
@@ -207,6 +204,7 @@ export const likeSong = (id: number, like: boolean = true) => {
   return request({
     url: "/like",
     params: { id, like, timestamp: Date.now() },
+    meta: { service: "netease" },
   });
 };
 
@@ -229,6 +227,7 @@ export const matchSong = (
   return request({
     url: "/search/match",
     params: { title, artist, album, duration, md5 },
+    meta: { service: "netease" },
   });
 };
 
@@ -240,6 +239,7 @@ export const songDynamicCover = (id: number) => {
   return request({
     url: "/song/dynamic/cover",
     params: { id },
+    meta: { service: "netease" },
   });
 };
 
@@ -251,6 +251,7 @@ export const songChorus = (id: number) => {
   return request({
     url: "/song/chorus",
     params: { id },
+    meta: { service: "netease" },
   });
 };
 
@@ -262,6 +263,7 @@ export const songWikiSummary = (id: number) => {
   return request({
     url: "/song/wiki/summary",
     params: { id },
+    meta: { service: "netease" },
   });
 };
 
@@ -273,6 +275,7 @@ export const songSheetList = (id: number) => {
   return request({
     url: "/sheet/list",
     params: { id },
+    meta: { service: "netease" },
   });
 };
 
@@ -284,6 +287,7 @@ export const songSheetPreview = (id: number) => {
   return request({
     url: "/sheet/preview",
     params: { id },
+    meta: { service: "netease" },
   });
 };
 
@@ -296,5 +300,6 @@ export const songFirstListenInfo = (id: number) => {
   return request({
     url: "/music/first/listen/info",
     params: { id },
+    meta: { service: "netease" },
   });
 };

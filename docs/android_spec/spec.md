@@ -1,10 +1,10 @@
-# SPlayer Android 轻壳版 V1 Spec
+# SPlayer Android 轻壳版 V1.5 Spec
 
 ## 1. 目标
 
 做一个 **Android 独立 App**，基于现有 SPlayer 前端，使用 **Capacitor** 封装，复用现有 Oracle API，不依赖手机浏览器/PWA 入口。
 
-V1 必须同时解决两件事：
+V1.5 必须同时解决三件事：
 
 1. **App 化**
    - 独立图标
@@ -17,22 +17,26 @@ V1 必须同时解决两件事：
    - 不出现桌面布局硬塞到手机上的情况
    - 核心操作单手可用
    - 不明显费电
+3. **播放稳定性与媒体控制**
+   - 播放中途卡流时可恢复
+   - 缓冲时系统媒体时间轴不乱走
+   - 标准通知栏与锁屏媒体控制可用
 
 ---
 
 ## 2. 非目标
 
-V1 不做这些：
+V1.5 不做这些：
 
 - 原生后台播放 service
-- 锁屏原生媒体控制
+- 原生音频引擎迁移
 - 本地下载管理
 - 从其他 App 接收分享
 - iOS
 - 桌面端重构
 - 复杂动画和大规模视觉重设计
 
-先把 **“能正常像个手机 App 一样用”** 做出来。
+先把 **“能正常像个手机 App 一样用，并且播放器稳定可控”** 做出来。
 
 ---
 
@@ -45,6 +49,16 @@ V1 不做这些：
 - 继续使用现有 Vue 前端
 - 暂时保留 **hash 路由**
 
+### Android 调试包口径
+
+- `remote`
+  - 本地默认模式
+  - 完全依赖你自己部署的 `/splayer/*`
+- `embedded`
+  - GitHub CI 默认调试包模式
+  - 目标是 APK 内置当前 App 实际使用到的 API runtime
+  - 当前实现进度以 `feature_implementation_comparison.md` 为准
+
 ### 后端
 
 继续复用你现有部署：
@@ -52,7 +66,7 @@ V1 不做这些：
 - Oracle 服务器
 - Nginx
 - 网易云兼容 API
-- 现有 `/api/netease` 入口
+- 统一挂在 `/splayer/*` 根路径下的接口入口
 
 ### 接口地址
 
@@ -60,7 +74,8 @@ Android 版不再依赖 `vercel.app/api/netease` 代理链。
 直接配置为你的 Oracle API 地址，例如：
 
 ```text
-VITE_API_URL=http://159.13.36.12/api/netease
+VITE_API_ROOT=http://192.9.181.26/splayer
+VITE_ANDROID_API_MODE=remote
 ```
 
 后面如果 Oracle 上 HTTPS，再切成 `https://...`
@@ -75,11 +90,13 @@ VITE_API_URL=http://159.13.36.12/api/netease
 - 搜索可用
 - 登录可用
 - 播放页可用
+- 评论入口可用
 - 歌单/详情页可用
 - 歌词页可用
 - 设置页可用
 - 系统分享可用
 - 登录态重开 App 后仍保留
+- 标准通知栏与锁屏媒体控制可用
 
 ### 必做移动端 UI 修复
 
@@ -123,6 +140,7 @@ VITE_API_URL=http://159.13.36.12/api/netease
 - 歌曲信息、进度条、控制按钮垂直排布
 - 不出现按钮超出屏幕
 - 歌词区可滚动且不与整体滚动冲突
+- 评论与播放队列使用底部抽屉，不再依赖左右滑页
 
 #### 4.6 弹窗 / 抽屉 / 菜单
 
@@ -202,7 +220,9 @@ VITE_API_URL=http://159.13.36.12/api/netease
 
 ```json
 {
-  "build:mobile": "...",
+  "build:mobile": "pnpm build:mobile:remote",
+  "build:mobile:remote": "...",
+  "build:mobile:embedded": "...",
   "cap:sync": "npx cap sync android",
   "cap:open": "npx cap open android"
 }
@@ -215,7 +235,11 @@ VITE_API_URL=http://159.13.36.12/api/netease
 目标：
 
 - `build:web` 给 Vercel
-- `build:mobile` 给 Capacitor
+- `build:mobile:remote` 给本地远程服务模式
+- `build:mobile:embedded` 给 GitHub CI 调试包模式
+- `build:mobile` 默认别名到 `build:mobile:remote`
+
+`embedded` 的目标定义是“完全本地 APK”，但实际实现状态必须以对照表和取舍文档为准，不能跳过 provider 覆盖面验证。
 
 ### 6.3 平台桥接
 
@@ -230,12 +254,18 @@ VITE_API_URL=http://159.13.36.12/api/netease
 - Web：`navigator.share`
 - Android：`@capacitor/share`
 
+V1.5 额外要求：
+
+- Android 返回键由应用自己接管
+- Android 媒体桥负责通知栏、锁屏卡片和媒体按钮控制
+
 ### 6.4 环境变量
 
 新增移动端环境：
 
 ```text
-VITE_API_URL=http://159.13.36.12/api/netease
+VITE_API_ROOT=http://192.9.181.26/splayer
+VITE_ANDROID_API_MODE=remote|embedded
 ```
 
 ### 6.5 样式体系整改
@@ -323,6 +353,7 @@ VITE_API_URL=http://159.13.36.12/api/netease
 - 登录成功后重启 App，登录态仍在
 - 搜索、播放、查看歌单正常
 - 分享按钮能调起系统分享面板
+- 锁屏与通知栏出现标准媒体控制
 
 ### UI 验收
 
@@ -342,6 +373,7 @@ VITE_API_URL=http://159.13.36.12/api/netease
 - 首页首屏不明显卡顿
 - 切后台后不持续异常耗电
 - 长时间停留非播放页不应高频请求接口
+- 缓冲时不应继续按系统时钟推进媒体进度
 
 ---
 
@@ -368,6 +400,8 @@ VITE_API_URL=http://159.13.36.12/api/netease
 - 分享
 - 外链打开
 - 必要的存储兼容检查
+- 返回键接管
+- 通知栏 / 锁屏媒体控制
 
 ### Phase 4：收尾
 

@@ -61,18 +61,42 @@
 
 当前 Android 版本基于 `Capacitor + dist_mobile`，默认输出可安装的 `debug APK`，适合本地调试或连接你自己部署的 Netease API。
 
-1. 复制 `.env.example` 为 `.env.mobile`，并把 `VITE_API_URL` 改成你自己的 API 地址
+1. 复制 `.env.example` 为 `.env.mobile`
 2. 执行 `pnpm install`
-3. 执行 `pnpm build:mobile`
-4. 执行 `pnpm cap:sync`
-5. 进入 `android` 目录后执行 `.\gradlew.bat assembleDebug`
+3. 把 `VITE_API_ROOT` 改成你自己的服务根路径，例如 `http://192.9.181.26/splayer`
+4. 本地默认执行 `pnpm build:mobile:remote`
+5. 如需验证内置 runtime 入口，可执行 `pnpm build:mobile:embedded`
+6. 执行 `pnpm cap:sync`
+7. 进入 `android` 目录后执行 `.\gradlew.bat assembleDebug`
 
 生成的 APK 默认位于 `android/app/build/outputs/apk/debug/app-debug.apk`
 
+#### Android V1.5 两种 APK 口径
+
+| 模式       | 构建命令                     | 说明                                                                        | 当前状态                                                    |
+| ---------- | ---------------------------- | --------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| `remote`   | `pnpm build:mobile:remote`   | 完全依赖你自己的 `/splayer/*` 服务根路径                                    | 已可用                                                      |
+| `embedded` | `pnpm build:mobile:embedded` | 目标是 APK 内置当前 App 实际调用到的 API runtime，不再依赖远程 `/splayer/*` | 构建链与 CI 已接好，provider 尚未补齐，未实现调用会回退远程 |
+
 > [!NOTE]
 >
-> - `.env.mobile` 已加入 `.gitignore`，请不要提交你自己的 API 地址
+> - `.env.mobile` 已加入 `.gitignore`，请不要提交你自己的服务地址
+> - 当前推荐把服务统一挂到 `/splayer/*`，例如 `/splayer/netease`、`/splayer/unblock`、`/splayer/qqmusic`
+> - 当前如果你要一个“完全依赖自己服务器”的 APK，请使用 `remote`
+> - 当前如果你要验证“本地化 runtime”构建链，请使用 `embedded`，但不要把它误认为已经是完全本地 APK
 > - 当前 `debug` 构建允许连接 `http://` API，方便本地自测；如需分发或正式使用，建议改为 `https://`
+
+### Android CI
+
+仓库新增了 `Build Android Debug APK` 工作流。每次 `push` 后会自动执行：
+
+- `pnpm lint`
+- `pnpm typecheck:web`
+- `pnpm build:mobile:embedded`
+- `pnpm cap:sync`
+- `./gradlew assembleDebug`
+
+最终会把 `app-debug.apk` 作为 GitHub Actions Artifact 上传，产物名为 `app-debug-apk`。
 
 ## 💬 交流群
 
@@ -219,10 +243,10 @@ docker run -d --name SPlayer -p 25884:25884 imsyy/splayer:latest
 1. 本程序依赖 [NeteaseCloudMusicApi](https://github.com/neteasecloudmusicapienhanced/api-enhanced) 运行，请确保您已成功部署该项目或兼容的项目，并成功取得在线访问地址
 2. 点击本仓库右上角的 `Fork`，复制本仓库到你的 `GitHub` 账号
 3. 复制 `/.env.example` 文件并重命名为 `/.env`
-4. 将 `.env` 文件中的 `VITE_API_URL` 改为第一步得到的 API 地址
+4. 将 `.env` 文件中的 `VITE_API_ROOT` 改为第一步得到的 API 根路径
 
    ```js
-   VITE_API_URL = "https://example.com";
+   VITE_API_ROOT = "https://example.com/splayer";
    ```
 
 5. 将 `Build and Output Settings` 中的 `Output Directory` 改为 `out/renderer`
@@ -281,13 +305,19 @@ docker run -d --name SPlayer -p 25884:25884 imsyy/splayer:latest
 #### ⚙️ Android 自编译 APK
 
 1. 准备 Android Studio、Android SDK、JDK 21 及 `adb`
-2. 复制 `.env.example` 为 `.env.mobile`，把 `VITE_API_URL` 改成你自己的 API 地址
-3. 执行 `pnpm build:mobile`
-4. 执行 `pnpm cap:sync`
-5. 进入 `android` 目录执行 `.\gradlew.bat assembleDebug`
-6. 使用 `adb install -r android/app/build/outputs/apk/debug/app-debug.apk` 安装到手机
+2. 复制 `.env.example` 为 `.env.mobile`，把 `VITE_API_ROOT` 改成你自己的服务根路径
+3. 如果你要完全依赖自己服务器的调试包，执行 `pnpm build:mobile:remote`
+4. 如果你要验证内置 runtime 构建链，执行 `pnpm build:mobile:embedded`
+5. 执行 `pnpm cap:sync`
+6. 进入 `android` 目录执行 `.\gradlew.bat assembleDebug`
+7. 使用 `adb install -r android/app/build/outputs/apk/debug/app-debug.apk` 安装到手机
 
-当前仓库不会内置公共 Netease API，请自行部署兼容接口或使用你自己的服务地址。
+GitHub Actions 会在 `push` 后自动打出 `embedded` 调试包，并把 APK 上传为 Artifact。
+
+> [!WARNING]
+>
+> 当前 `embedded` 只完成了运行时挂点、模式切换、CI 和构建链，并没有把 `netease / unblock / qqmusic` 的本地 provider 全部补齐。
+> 如果你的要求是“完全不依赖 `/splayer/*` 远程服务的本地 APK”，这一条当前还没有交付完成。
 
 ## 😘 鸣谢
 

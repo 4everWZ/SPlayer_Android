@@ -45,6 +45,10 @@ interface StatusState {
   playStatus: boolean;
   /** 播放加载状态 */
   playLoading: boolean;
+  /** 播放缓冲状态 */
+  playBuffering: boolean;
+  /** 播放恢复状态 */
+  playRecovering: boolean;
   /** 播放速度 */
   playRate: number;
   /** 播放音量 */
@@ -94,6 +98,10 @@ interface StatusState {
   duration: number;
   /** 实时播放进度 */
   progress: number;
+  /** 最近一次稳定进度时间戳 */
+  lastProgressAt: number;
+  /** 最近一次稳定播放位置 */
+  lastStablePosition: number;
   /** 每首歌曲的进度偏移（按歌曲 id 记忆） */
   currentTimeOffsetMap: Record<number, number>;
   /** 主内容高度 */
@@ -193,6 +201,8 @@ export const useStatusStore = defineStore("status", {
     showPlayBar: true,
     playStatus: false,
     playLoading: true,
+    playBuffering: false,
+    playRecovering: false,
     playListShow: false,
     playerSongMenuOpen: false,
     playerControlsDrawerOpen: false,
@@ -202,6 +212,8 @@ export const useStatusStore = defineStore("status", {
     currentTime: 0,
     duration: 0,
     progress: 0,
+    lastProgressAt: 0,
+    lastStablePosition: 0,
     currentTimeOffsetMap: {},
     songCoverTheme: {},
     pureLyricMode: false,
@@ -384,6 +396,10 @@ export const useStatusStore = defineStore("status", {
         this.playListShow = false;
         return true;
       }
+      if (this.showPlayerComment) {
+        this.showPlayerComment = false;
+        return true;
+      }
       if (
         typeof document !== "undefined" &&
         document.querySelector(".n-modal-container .n-modal, .n-modal-container .n-dialog")
@@ -511,6 +527,8 @@ export const useStatusStore = defineStore("status", {
         lyricIndex: -1,
         playStatus: false,
         playLoading: false,
+        playBuffering: false,
+        playRecovering: false,
         playListShow: false,
         playerSongMenuOpen: false,
         playerControlsDrawerOpen: false,
@@ -518,6 +536,8 @@ export const useStatusStore = defineStore("status", {
         showFullPlayer: false,
         personalFmMode: false,
         playIndex: -1,
+        lastProgressAt: 0,
+        lastStablePosition: 0,
         listSortField: "default",
         listSortOrder: "default",
       });

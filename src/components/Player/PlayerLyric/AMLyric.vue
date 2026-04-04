@@ -29,7 +29,7 @@
         ref="lyricPlayerRef"
         :lyricLines="amLyricsData"
         :currentTime="currentTime"
-        :playing="statusStore.playStatus"
+        :playing="playing"
         :enableSpring="settingStore.useAMSpring"
         :enableScale="settingStore.useAMSpring"
         :alignPosition="settingStore.lyricsScrollOffset"
@@ -67,6 +67,10 @@ defineProps({
   currentTime: {
     type: Number,
     default: 0,
+  },
+  playing: {
+    type: Boolean,
+    default: false,
   },
 });
 
