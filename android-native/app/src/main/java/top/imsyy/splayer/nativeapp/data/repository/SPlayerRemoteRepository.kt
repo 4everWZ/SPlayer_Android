@@ -1,0 +1,1275 @@
+package top.imsyy.splayer.nativeapp.data.repository
+
+import java.util.concurrent.ConcurrentHashMap
+import javax.inject.Inject
+import javax.inject.Singleton
+import kotlin.math.max
+import kotlin.math.min
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.supervisorScope
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.longOrNull
+import top.imsyy.splayer.nativeapp.data.api.SPlayerApiService
+import top.imsyy.splayer.nativeapp.model.CommentItem
+import top.imsyy.splayer.nativeapp.model.CommentPageResult
+import top.imsyy.splayer.nativeapp.model.DiscoveryHomeUi
+import top.imsyy.splayer.nativeapp.model.LyricLineUi
+import top.imsyy.splayer.nativeapp.model.LyricWordUi
+import top.imsyy.splayer.nativeapp.model.AlbumDetailUi
+import top.imsyy.splayer.nativeapp.model.AlbumItem
+import top.imsyy.splayer.nativeapp.model.PlaylistDetailUi
+import top.imsyy.splayer.nativeapp.model.PlaylistItem
+import top.imsyy.splayer.nativeapp.model.PodcastHomeUi
+import top.imsyy.splayer.nativeapp.model.RadioCategoryUi
+import top.imsyy.splayer.nativeapp.model.RadioDetailUi
+import top.imsyy.splayer.nativeapp.model.RadioItem
+import top.imsyy.splayer.nativeapp.model.ArtistItem
+import top.imsyy.splayer.nativeapp.model.MyMusicHomeUi
+import top.imsyy.splayer.nativeapp.model.TrackItem
+import top.imsyy.splayer.nativeapp.model.TrackSource
+import top.imsyy.splayer.nativeapp.model.UserAccountUi
+
+data class QrCheckState(
+    val code: Int,
+    val cookieHeader: String = "",
+)
+
+@Singleton
+class SPlayerRemoteRepository @Inject constructor(
+    private val api: SPlayerApiService,
+) {
+    private companion object {
+        const val PLAYLIST_PREVIEW_SIZE = 20
+        const val PLAYLIST_INITIAL_PAGE_SIZE = 80
+        const val PLAYLIST_PAGE_SIZE = 200
+    }
+
+    private val officialLevels = listOf("exhigh", "higher", "standard")
+    private val playlistDetailCache = ConcurrentHashMap<Long, PlaylistDetailUi>()
+    private val playlistPageCache = ConcurrentHashMap<String, List<TrackItem>>()
+    private val lyricCache = ConcurrentHashMap<Long, List<LyricLineUi>>()
+    private val hotCommentCache = ConcurrentHashMap<Long, CommentPageResult>()
+    private val latestCommentCache = ConcurrentHashMap<String, CommentPageResult>()
+    private val albumDetailCache = ConcurrentHashMap<Long, AlbumDetailUi>()
+    private val inFlightRequests = ConcurrentHashMap<String, CompletableDeferred<Any?>>()
+    private val inFlightLock = Any()
+    @Volatile
+    private var discoveryHomeCache: DiscoveryHomeUi? = null
+
+    @Volatile
+    private var podcastHomeCache: PodcastHomeUi? = null
+
+    @Volatile
+    private var searchDefaultCache: String? = null
+
+    @Volatile
+    private var searchHotCache: List<String>? = null
+    private val json = Json {
+        ignoreUnknownKeys = true
+        isLenient = true
+    }
+
+    fun peekCachedPlaylistDetail(playlistId: Long): PlaylistDetailUi? = playlistDetailCache[playlistId]
+
+    fun peekCachedLyrics(trackId: Long): List<LyricLineUi>? = lyricCache[trackId]
+
+    fun peekCachedHotComments(songId: Long): CommentPageResult? = hotCommentCache[songId]
+
+    fun peekCachedLatestComments(songId: Long, pageNo: Int = 1): CommentPageResult? {
+        return latestCommentCache[latestCommentCacheKey(songId, pageNo)]
+    }
+
+    suspend fun fetchPlaylistPreviewDetail(
+        playlistId: Long,
+        forceRefresh: Boolean = false,
+    ): PlaylistDetailUi {
+        if (!forceRefresh) {
+            playlistDetailCache[playlistId]?.let { return it }
+        }
+        return awaitInFlight("playlist-preview:$playlistId") {
+            val playlist = requestPlaylistPayload(playlistId)
+            val cachedTracks = playlistDetailCache[playlistId]?.tracks.orEmpty()
+            val previewTracks = playlist.array("tracks").mapNotNull { it.toTrackItem() }.take(PLAYLIST_PREVIEW_SIZE)
+            buildPlaylistDetail(
+                playlistId = playlistId,
+                playlist = playlist,
+                tracks = mergeTrackItems(cachedTracks, previewTracks),
+            ).also { detail ->
+                playlistDetailCache[playlistId] = detail
+            }
+        }
+    }
+
+    suspend fun fetchPlaylistInitialTracks(
+        playlistId: Long,
+        forceRefresh: Boolean = false,
+    ): List<TrackItem> {
+        return fetchPlaylistTracksPage(
+            playlistId = playlistId,
+            offset = 0,
+            limit = PLAYLIST_INITIAL_PAGE_SIZE,
+            forceRefresh = forceRefresh,
+        )
+    }
+
+    suspend fun fetchLoginState(): UserAccountUi? {
+        val result = getNetease("login/status")
+        val data = result.obj("data")
+        val accountUser = data.obj("account").toUserAccount(profile = data.obj("profile"))
+        if (accountUser != null) return accountUser
+
+        val profileUser = getNetease("user/account").obj("profile").toUserAccount()
+        if (profileUser != null) return profileUser
+
+        return null
+    }
+
+    suspend fun fetchQrKey(): String {
+        return getNetease("login/qr/key", mapOf("timestamp" to now())).obj("data").string("unikey")
+    }
+
+    suspend fun fetchQrImage(key: String): String {
+        return getNetease(
+            "login/qr/create",
+            mapOf(
+                "key" to key,
+                "qrimg" to "true",
+                "timestamp" to now(),
+            ),
+        ).obj("data").string("qrimg")
+    }
+
+    suspend fun checkQrState(key: String): QrCheckState {
+        val response = getNetease(
+            "login/qr/check",
+            mapOf("key" to key, "timestamp" to now()),
+        )
+        return QrCheckState(
+            code = response.int("code"),
+            cookieHeader = response.string("cookie"),
+        )
+    }
+
+    suspend fun fetchPersonalizedPlaylists(limit: Int = 12): List<PlaylistItem> {
+        return getNetease("personalized", mapOf("limit" to limit.toString()))
+            .array("result")
+            .mapNotNull { item -> item.toPlaylistItem() }
+    }
+
+    suspend fun fetchDiscoveryHome(forceRefresh: Boolean = false): DiscoveryHomeUi {
+        if (!forceRefresh) {
+            discoveryHomeCache?.let { return it }
+        }
+        return supervisorScope {
+            val playlistResponse = async { getNetease("personalized", mapOf("limit" to "12")) }
+            val songResponse = async { getNetease("top/song", mapOf("type" to "0")) }
+            val artistResponse = async { getNetease("top/artists", mapOf("limit" to "12")) }
+            val albumResponse = async { getNetease("album/new") }
+            val toplistResponse = async { getNetease("toplist/detail") }
+            DiscoveryHomeUi(
+                recommendedPlaylists = playlistResponse.await().array("result").mapNotNull { it.toPlaylistItem() },
+                newSongs = songResponse.await().array("data").mapNotNull { it.toTrackItem() },
+                topArtists = artistResponse.await().array("artists").mapNotNull { it.toArtistItem() },
+                newAlbums = albumResponse.await().array("albums").mapNotNull { it.toAlbumItem() },
+                topPlaylists = toplistResponse.await().array("list").mapNotNull { it.toPlaylistItem() }.take(6),
+            )
+        }.also { discoveryHome ->
+            discoveryHomeCache = discoveryHome
+        }
+    }
+
+    suspend fun fetchPodcastHome(forceRefresh: Boolean = false): PodcastHomeUi {
+        if (!forceRefresh) {
+            podcastHomeCache?.let { return it }
+        }
+        return supervisorScope {
+            val recommendResponse = async { getNetease("dj/recommend") }
+            val toplistResponse = async {
+                getNetease(
+                    "dj/toplist",
+                    mapOf("type" to "hot", "limit" to "12", "offset" to "0"),
+                )
+            }
+            val categoryResponse = async { getNetease("dj/category/recommend") }
+            PodcastHomeUi(
+                recommendedRadios = recommendResponse.await().array("djRadios").mapNotNull { it.toRadioItem() },
+                hotRadios = toplistResponse.await().array("toplist").mapNotNull { it.toRadioItem() },
+                categories = categoryResponse.await().array("data").mapNotNull { item ->
+                    val category = item.obj
+                    val radios = category.array("radios").mapNotNull { it.toRadioItem() }
+                    val id = category.long("categoryId")
+                    val name = category.string("categoryName")
+                    if (id <= 0L || name.isBlank()) return@mapNotNull null
+                    RadioCategoryUi(
+                        id = id,
+                        name = name,
+                        radios = radios,
+                    )
+                },
+            )
+        }.also { podcastHome ->
+            podcastHomeCache = podcastHome
+        }
+    }
+
+    suspend fun fetchRadioDetail(radioId: Long): RadioDetailUi {
+        val detail = getNetease(
+            "dj/detail",
+            mapOf("rid" to radioId.toString()),
+        ).obj("data")
+        val programs = getNetease(
+            "dj/program",
+            mapOf("rid" to radioId.toString(), "limit" to detail.int("programCount").coerceAtLeast(1).toString()),
+        ).array("programs").mapNotNull { it.toRadioProgramTrack() }
+        return RadioDetailUi(
+            id = detail.long("id"),
+            name = detail.string("name"),
+            coverUrl = detail.string("picUrl"),
+            description = detail.string("desc"),
+            programCount = detail.int("programCount"),
+            programs = programs,
+        )
+    }
+
+    suspend fun fetchMyMusicHome(recentTracks: List<TrackItem>): MyMusicHomeUi {
+        val currentUser = fetchLoginState()
+        if (currentUser == null) {
+            return MyMusicHomeUi(recentTracks = recentTracks)
+        }
+        return supervisorScope {
+            val profile = async {
+                getNetease(
+                    "user/detail",
+                    mapOf("uid" to currentUser.userId.toString(), "timestamp" to now()),
+                )
+            }
+            val likeResponse = async {
+                getNetease("likelist", mapOf("uid" to currentUser.userId.toString()))
+            }
+            val playlistResponse = async {
+                getNetease(
+                    "user/playlist",
+                    mapOf("uid" to currentUser.userId.toString(), "limit" to "20", "offset" to "0"),
+                )
+            }
+            val albumResponse = async {
+                getNetease(
+                    "album/sublist",
+                    mapOf("limit" to "20", "offset" to "0", "timestamp" to now()),
+                )
+            }
+            val profilePayload = profile.await()
+            val profileUser = profilePayload.obj("profile").toUserAccount().let { user ->
+                if (user == null) {
+                    currentUser
+                } else {
+                    user.copy(
+                        level = profilePayload.int("level"),
+                        followCount = profilePayload.obj("profile").int("follows"),
+                        followerCount = profilePayload.obj("profile").int("followeds"),
+                        listenCount = profilePayload.int("listenSongs"),
+                    )
+                }
+            }
+            val playlists = playlistResponse.await().array("playlist").mapNotNull { it.toPlaylistItem() }
+            val createdPlaylists = playlists.filter { it.creatorUserId == profileUser.userId }
+            val collectedPlaylists = playlists.filter { it.creatorUserId != profileUser.userId }
+            MyMusicHomeUi(
+                currentUser = profileUser,
+                likedSongCount = likeResponse.await().array("ids").size,
+                likedPlaylist = playlists.resolveLikedPlaylist(profileUser.userId),
+                recentTracks = recentTracks,
+                createdPlaylists = createdPlaylists.take(12),
+                collectedPlaylists = collectedPlaylists.take(12),
+                albums = albumResponse.await().array("data").mapNotNull { it.toAlbumItem() }.take(12),
+            )
+        }
+    }
+
+    suspend fun fetchPlaylistDetail(
+        playlistId: Long,
+        forceRefresh: Boolean = false,
+    ): PlaylistDetailUi {
+        if (!forceRefresh) {
+            playlistDetailCache[playlistId]
+                ?.takeIf { cached -> cached.trackCount == 0 || cached.tracks.size >= min(cached.trackCount, PLAYLIST_PAGE_SIZE) }
+                ?.let { return it }
+        }
+        val preview = fetchPlaylistPreviewDetail(
+            playlistId = playlistId,
+            forceRefresh = forceRefresh,
+        )
+        if (preview.trackCount <= 0) {
+            return preview
+        }
+        val firstPage = fetchPlaylistTracksPage(
+            playlistId = playlistId,
+            offset = 0,
+            limit = PLAYLIST_PAGE_SIZE,
+            forceRefresh = forceRefresh,
+        )
+        return preview.copy(
+            tracks = mergeTrackItems(preview.tracks, firstPage),
+        ).also { detail ->
+            playlistDetailCache[playlistId] = detail
+        }
+    }
+
+    suspend fun fetchPlaylistTracksPage(
+        playlistId: Long,
+        offset: Int,
+        limit: Int = PLAYLIST_PAGE_SIZE,
+        forceRefresh: Boolean = false,
+    ): List<TrackItem> {
+        val safeOffset = offset.coerceAtLeast(0)
+        val safeLimit = limit.coerceAtLeast(1)
+        val cacheKey = playlistPageCacheKey(playlistId, safeOffset, safeLimit)
+        if (!forceRefresh) {
+            playlistPageCache[cacheKey]?.let { return it }
+        }
+        return awaitInFlight("playlist-page:$cacheKey") {
+            getNetease(
+                "playlist/track/all",
+                mapOf(
+                    "id" to playlistId.toString(),
+                    "limit" to safeLimit.toString(),
+                    "offset" to safeOffset.toString(),
+                    "timestamp" to now(),
+                ),
+            ).array("songs").mapNotNull { song ->
+                song.toTrackItem()
+            }.also { page ->
+                playlistPageCache[cacheKey] = page
+                playlistDetailCache[playlistId]?.let { cached ->
+                    playlistDetailCache[playlistId] = cached.copy(
+                        tracks = mergeTrackItems(cached.tracks, page),
+                    )
+                }
+            }
+        }
+    }
+
+    suspend fun fetchAlbumDetail(albumId: Long, forceRefresh: Boolean = false): AlbumDetailUi {
+        if (!forceRefresh) {
+            albumDetailCache[albumId]?.let { return it }
+        }
+        return supervisorScope {
+            val albumResponse = async {
+                getNetease(
+                    "album",
+                    mapOf("id" to albumId.toString(), "timestamp" to now()),
+                )
+            }
+            val dynamicResponse = async {
+                getNetease(
+                    "album/detail/dynamic",
+                    mapOf("id" to albumId.toString(), "timestamp" to now()),
+                )
+            }
+            val albumPayload = albumResponse.await()
+            val dynamicPayload = dynamicResponse.await()
+            val album = albumPayload.obj("album")
+            val artistName = album.obj("artist").string("name")
+                .ifBlank { album.array("artists").firstOrNull()?.let { it.obj.string("name") }.orEmpty() }
+            val tracks = albumPayload.array("songs").mapNotNull { it.toTrackItem() }
+            AlbumDetailUi(
+                id = album.long("id"),
+                name = album.string("name"),
+                coverUrl = album.string("picUrl"),
+                artistName = artistName,
+                description = album.string("description").ifBlank { album.string("briefDesc") },
+                subscribedCount = dynamicPayload.long("subCount"),
+                shareCount = dynamicPayload.long("shareCount"),
+                commentCount = dynamicPayload.int("commentCount"),
+                trackCount = album.int("size").takeIf { it > 0 } ?: tracks.size,
+                tracks = tracks,
+            )
+        }.also { albumDetail ->
+            albumDetailCache[albumId] = albumDetail
+        }
+    }
+
+    suspend fun fetchSearchDefault(forceRefresh: Boolean = false): String {
+        if (!forceRefresh) {
+            searchDefaultCache?.let { return it }
+        }
+        return getNetease("search/default", mapOf("timestamp" to now()))
+            .obj("data")
+            .string("showKeyword")
+            .also { defaultHint ->
+                if (defaultHint.isNotBlank()) {
+                    searchDefaultCache = defaultHint
+                }
+            }
+    }
+
+    suspend fun fetchSearchHot(forceRefresh: Boolean = false): List<String> {
+        if (!forceRefresh) {
+            searchHotCache?.let { return it }
+        }
+        return getNetease("search/hot/detail")
+            .array("data")
+            .map { it.obj.string("searchWord") }
+            .filter { it.isNotBlank() }
+            .also { hotKeywords ->
+                if (hotKeywords.isNotEmpty()) {
+                    searchHotCache = hotKeywords
+                }
+            }
+    }
+
+    suspend fun fetchSearchResult(keyword: String): List<TrackItem> {
+        val result = getNetease(
+            "cloudsearch",
+            mapOf(
+                "keywords" to keyword,
+                "limit" to "50",
+                "offset" to "0",
+                "type" to "1",
+            ),
+        ).obj("result")
+
+        return result.array("songs").mapNotNull { element ->
+            val song = element.obj
+            val artists = song.array("ar").joinToString(" / ") { artist -> artist.obj.string("name") }
+            val album = song.obj("al")
+            val id = song.long("id")
+            if (id <= 0L) return@mapNotNull null
+            TrackItem(
+                id = id,
+                name = song.string("name"),
+                artists = artists,
+                album = album.string("name"),
+                coverUrl = album.string("picUrl"),
+                durationMs = song.long("dt"),
+                keyword = listOf(song.string("name"), artists).joinToString(" "),
+            )
+        }
+    }
+
+    suspend fun fetchLyrics(
+        track: TrackItem,
+        forceRefresh: Boolean = false,
+    ): List<LyricLineUi> {
+        if (!forceRefresh) {
+            lyricCache[track.id]?.let { return it }
+        }
+        return awaitInFlight("lyrics:${track.id}") {
+            val response = getNetease("lyric/new", mapOf("id" to track.id.toString()))
+            val yrc = response.obj("yrc").string("lyric")
+            val ytlrc = response.obj("ytlrc").string("lyric")
+            val yromalrc = response.obj("yromalrc").string("lyric")
+            val lrc = response.obj("lrc").string("lyric")
+            val tlyric = response.obj("tlyric").string("lyric")
+            val romalrc = response.obj("romalrc").string("lyric")
+            parseNeteaseYrc(yrc, ytlrc, yromalrc)
+                .takeIf { it.isNotEmpty() }
+                ?.let { parsed ->
+                    return@awaitInFlight sanitizeLyricLines(parsed).also { lyricCache[track.id] = it }
+                }
+            parseLyric(lrc, tlyric, romalrc)
+                .takeIf { it.isNotEmpty() }
+                ?.let { parsed ->
+                    return@awaitInFlight sanitizeLyricLines(parsed).also { lyricCache[track.id] = it }
+                }
+            parseTtmlLyric(track.id)
+                .takeIf { it.isNotEmpty() }
+                ?.let { parsed ->
+                    return@awaitInFlight sanitizeLyricLines(parsed).also { lyricCache[track.id] = it }
+                }
+            sanitizeLyricLines(parseQQMusicLyric(track)).also { lyricCache[track.id] = it }
+        }
+    }
+
+    suspend fun fetchHotComments(
+        songId: Long,
+        forceRefresh: Boolean = false,
+    ): CommentPageResult {
+        if (!forceRefresh) {
+            hotCommentCache[songId]?.let { return it }
+        }
+        return awaitInFlight("comments-hot:$songId") {
+            getNetease(
+                "comment/hot",
+                mapOf(
+                    "id" to songId.toString(),
+                    "type" to "0",
+                    "limit" to "20",
+                    "offset" to "0",
+                    "timestamp" to now(),
+                ),
+            ).let { response ->
+                CommentPageResult(
+                    comments = response.array("hotComments").map { it.toComment() },
+                    totalCount = response.int("total"),
+                    hasMore = response.boolean("hasMore"),
+                )
+            }.also { result ->
+                hotCommentCache[songId] = result
+            }
+        }
+    }
+
+    suspend fun fetchLatestComments(
+        songId: Long,
+        pageNo: Int = 1,
+        forceRefresh: Boolean = false,
+    ): CommentPageResult {
+        val cacheKey = latestCommentCacheKey(songId, pageNo)
+        if (!forceRefresh) {
+            latestCommentCache[cacheKey]?.let { return it }
+        }
+        return awaitInFlight("comments-latest:$cacheKey") {
+            getNetease(
+                "comment/new",
+                mapOf(
+                    "id" to songId.toString(),
+                    "type" to "0",
+                    "pageNo" to pageNo.toString(),
+                    "pageSize" to "20",
+                    "sortType" to "3",
+                    "timestamp" to now(),
+                ),
+            ).obj("data").let { data ->
+                CommentPageResult(
+                    comments = data.array("comments").map { it.toComment() },
+                    totalCount = data.int("totalCount"),
+                    hasMore = data.boolean("hasMore"),
+                )
+            }.also { result ->
+                latestCommentCache[cacheKey] = result
+            }
+        }
+    }
+
+    suspend fun resolveSongSource(
+        track: TrackItem,
+        tryOfficial: Boolean,
+        enabledUnlockServers: List<String>,
+    ): TrackSource {
+        if (tryOfficial) {
+            for (level in officialLevels) {
+                val official = getNetease(
+                    "song/url/v1",
+                    mapOf(
+                        "id" to track.id.toString(),
+                        "level" to level,
+                        "timestamp" to now(),
+                    ),
+                ).array("data").firstOrNull()?.obj
+
+                val officialUrl = normalizeUrl(official?.string("url").orEmpty())
+                if (officialUrl.isNotBlank()) {
+                    return TrackSource(
+                        url = officialUrl,
+                        quality = official?.string("level").orEmpty().ifBlank { level },
+                        source = "official",
+                        unlocked = false,
+                    )
+                }
+            }
+        }
+
+        for (server in enabledUnlockServers) {
+            val result = getUnblock(
+                server = server,
+                params = if (server == "netease") {
+                    mapOf("id" to track.id.toString(), "noCookie" to "true")
+                } else {
+                    mapOf(
+                        "keyword" to track.keyword,
+                        "songName" to track.name,
+                        "artist" to track.artists,
+                        "noCookie" to "true",
+                    )
+                },
+            )
+            val url = normalizeUrl(result.string("url"))
+            if (url.isNotBlank()) {
+                return TrackSource(
+                    url = url,
+                    quality = result.string("br"),
+                    source = server,
+                    unlocked = true,
+                )
+            }
+        }
+
+        error("AUDIO_SOURCE_EMPTY")
+    }
+
+    private suspend fun getNetease(path: String, params: Map<String, String> = emptyMap()): JsonObject {
+        val body = getRaw("netease/$path", params)
+        return parseJsonObjectBody(body)
+    }
+
+    private suspend fun requestPlaylistPayload(playlistId: Long): JsonObject {
+        return getNetease(
+            "playlist/detail",
+            mapOf(
+                "id" to playlistId.toString(),
+                "s" to "0",
+                "noCookie" to "true",
+                "timestamp" to now(),
+            ),
+        ).obj("playlist")
+    }
+
+    private suspend fun getUnblock(server: String, params: Map<String, String>): JsonObject {
+        val body = getRaw("unblock/$server", params)
+        return parseJsonObjectBody(body)
+    }
+
+    private suspend fun getQQMusic(path: String, params: Map<String, String> = emptyMap()): JsonObject {
+        val body = getRaw("qqmusic/$path", params)
+        return parseJsonObjectBody(body)
+    }
+
+    private fun normalizeUrl(url: String): String {
+        if (url.isBlank()) return ""
+        return url.replace("http://", "https://")
+    }
+
+    private suspend fun getRaw(path: String, params: Map<String, String> = emptyMap()): String {
+        return api.get(path, params).string()
+    }
+
+    private fun parseJsonObjectBody(rawBody: String): JsonObject {
+        return json.parseToJsonElement(extractFirstJsonEnvelope(rawBody)).jsonObject
+    }
+
+    private fun buildPlaylistDetail(
+        playlistId: Long,
+        playlist: JsonObject,
+        tracks: List<TrackItem>,
+    ): PlaylistDetailUi {
+        val trackCount = max(playlist.int("trackCount"), 0)
+        return PlaylistDetailUi(
+            id = playlist.long("id").takeIf { it > 0L } ?: playlistId,
+            name = playlist.string("name"),
+            coverUrl = playlist.string("coverImgUrl"),
+            description = playlist.string("description"),
+            playCount = playlist.long("playCount"),
+            subscribedCount = playlist.long("subscribedCount"),
+            trackCount = trackCount,
+            tracks = tracks.take(trackCount.takeIf { it > 0 } ?: tracks.size),
+        )
+    }
+
+    private fun playlistPageCacheKey(
+        playlistId: Long,
+        offset: Int,
+        limit: Int,
+    ): String = "$playlistId:$offset:$limit"
+
+    private fun latestCommentCacheKey(songId: Long, pageNo: Int): String = "$songId:$pageNo"
+
+    private suspend fun <T> awaitInFlight(key: String, block: suspend () -> T): T {
+        val waiter = synchronized(inFlightLock) {
+            @Suppress("UNCHECKED_CAST")
+            inFlightRequests[key] as CompletableDeferred<T>?
+        }
+        if (waiter != null) {
+            return waiter.await()
+        }
+
+        val deferred = CompletableDeferred<Any?>()
+        val active = synchronized(inFlightLock) {
+            inFlightRequests.putIfAbsent(key, deferred) ?: deferred
+        }
+        if (active !== deferred) {
+            @Suppress("UNCHECKED_CAST")
+            return (active as CompletableDeferred<T>).await()
+        }
+
+        try {
+            val result = block()
+            deferred.complete(result)
+            return result
+        } catch (error: Throwable) {
+            deferred.completeExceptionally(error)
+            throw error
+        } finally {
+            synchronized(inFlightLock) {
+                if (inFlightRequests[key] === deferred) {
+                    inFlightRequests.remove(key)
+                }
+            }
+        }
+    }
+
+    private fun mergeTrackItems(
+        existing: List<TrackItem>,
+        incoming: List<TrackItem>,
+    ): List<TrackItem> {
+        if (existing.isEmpty()) return incoming
+        if (incoming.isEmpty()) return existing
+        return (existing + incoming).distinctBy { track -> track.id }
+    }
+
+    private fun JsonElement.toComment(): CommentItem {
+        val root = obj
+        val user = root.obj("user")
+        return CommentItem(
+            id = root.long("commentId"),
+            userName = user.string("nickname"),
+            userAvatar = user.string("avatarUrl"),
+            content = root.string("content"),
+            likedCount = root.int("likedCount"),
+            time = root.long("time"),
+        )
+    }
+
+private fun JsonElement.toTrackItem(): TrackItem? {
+    val song = obj
+    val id = song.long("id")
+    if (id <= 0L) return null
+    val album = song.obj("al").takeIf { it.isNotEmpty() }
+        ?: song.obj("album").takeIf { it.isNotEmpty() }
+        ?: JsonObject(emptyMap())
+    val artists = song.array("ar").joinToString(" / ") { artist -> artist.obj.string("name") }
+        .ifBlank { song.array("artists").joinToString(" / ") { artist -> artist.obj.string("name") } }
+    val duration = song.long("dt").takeIf { it > 0L } ?: song.long("duration")
+    return TrackItem(
+        id = id,
+        name = song.string("name"),
+        artists = artists,
+        album = album.string("name"),
+        coverUrl = album.string("picUrl"),
+        durationMs = duration,
+        keyword = listOf(song.string("name"), artists).filter { it.isNotBlank() }.joinToString(" "),
+    )
+}
+
+    private fun parseLyric(
+        primaryLyric: String,
+        translationLyric: String,
+        romanizedLyric: String,
+    ): List<LyricLineUi> {
+        if (primaryLyric.isBlank()) return emptyList()
+        val translations = parsePlainLrcLines(translationLyric).associateBy { it.startTimeMs }
+        val romanized = parsePlainLrcLines(romanizedLyric).associateBy { it.startTimeMs }
+        return parsePlainLrcLines(primaryLyric).map { line ->
+            line.copy(
+                translation = translations[line.startTimeMs]?.mainText.orEmpty(),
+                romanized = romanized[line.startTimeMs]?.mainText.orEmpty(),
+            )
+        }
+    }
+
+    private fun parseNeteaseYrc(
+        primaryLyric: String,
+        translationLyric: String = "",
+        romanizedLyric: String = "",
+    ): List<LyricLineUi> {
+        return parseNeteaseYrcLines(
+            primaryLyric = primaryLyric,
+            translationLyric = translationLyric,
+            romanizedLyric = romanizedLyric,
+        )
+    }
+
+    private fun parsePlainLrc(content: String): List<LyricLineUi> {
+        return parsePlainLrcLines(content)
+    }
+
+    private suspend fun parseTtmlLyric(songId: Long): List<LyricLineUi> {
+        val body = runCatching {
+            getRaw(
+                "netease/lyric/ttml",
+                mapOf("id" to songId.toString(), "timestamp" to now()),
+            )
+        }.getOrNull().orEmpty()
+        if (body.isBlank()) return emptyList()
+        return parseTtmlLyricBody(body)
+    }
+
+    private suspend fun parseQQMusicLyric(track: TrackItem): List<LyricLineUi> {
+        val response = runCatching {
+            getQQMusic(
+                "match",
+                mapOf(
+                    "keyword" to track.keyword.ifBlank { "${track.name}-${track.artists}" },
+                ),
+            )
+        }.getOrNull() ?: return emptyList()
+        val qrcLyrics = parseTimedLyric(
+            primaryLyric = extractQrcContent(response.string("qrc")),
+            translationLyric = response.string("trans"),
+            romanizedLyric = response.string("roma"),
+        )
+        if (qrcLyrics.isNotEmpty()) return qrcLyrics
+        return parseLyric(
+            primaryLyric = response.string("lrc"),
+            translationLyric = response.string("trans"),
+            romanizedLyric = response.string("roma"),
+        )
+    }
+
+    private fun parseTimedLyric(
+        primaryLyric: String,
+        translationLyric: String = "",
+        romanizedLyric: String = "",
+    ): List<LyricLineUi> {
+        return parseTimedLyricLines(
+            primaryLyric = primaryLyric,
+            translationLyric = translationLyric,
+            romanizedLyric = romanizedLyric,
+        )
+    }
+
+    private fun extractQrcContent(rawContent: String): String {
+        if (rawContent.isBlank()) return ""
+        return Regex("""LyricContent="([^"]+)"""")
+            .find(rawContent)
+            ?.groupValues
+            ?.getOrNull(1)
+            ?.replace("&quot;", "\"")
+            ?.replace("&#10;", "\n")
+            ?.replace("\\n", "\n")
+            ?: rawContent
+    }
+
+    private fun now(): String = System.currentTimeMillis().toString()
+}
+
+private val plainLrcPattern = Regex("""\[(\d+):(\d+)(?:\.(\d+))?](.*)$""")
+private val yrcLinePattern = Regex("""^\[(\d+),(\d+)](.*)$""")
+private val yrcWordPattern = Regex("""\((\d+),(\d+),(\d+)\)([^()]*)""")
+private val timedLyricLinePattern = Regex("""\[(\d+),(\d+)](.*)$""")
+private val timedLyricWordPattern = Regex("""(.*?)\((\d+),(\d+)\)""")
+private val ttmlLinePattern = Regex("""<p\b([^>]*)>(.*?)</p>""", RegexOption.DOT_MATCHES_ALL)
+private val ttmlSpanPattern = Regex("""<span\b([^>]*)>(.*?)</span>""", RegexOption.DOT_MATCHES_ALL)
+private val ttmlTranslationPattern = Regex("""<span\b[^>]*ttm:role="(?:x-translation|x-bg)"[^>]*>(.*?)</span>""", RegexOption.DOT_MATCHES_ALL)
+private val ttmlRomanizedPattern = Regex("""<span\b[^>]*ttm:role="x-roman"[^>]*>(.*?)</span>""", RegexOption.DOT_MATCHES_ALL)
+private val ttmlAnyAttributePattern = Regex("""([A-Za-z:]+)="([^"]*)"""")
+
+internal fun parsePlainLrcLines(content: String): List<LyricLineUi> {
+    return content.lineSequence()
+        .mapNotNull { raw ->
+            val line = raw.trim()
+            val match = plainLrcPattern.find(line) ?: return@mapNotNull null
+            val minute = match.groupValues[1].toLongOrNull() ?: return@mapNotNull null
+            val second = match.groupValues[2].toLongOrNull() ?: return@mapNotNull null
+            val fraction = match.groupValues.getOrNull(3).orEmpty().padEnd(3, '0').take(3).toLongOrNull() ?: 0L
+            val mainText = match.groupValues[4].trim()
+            if (mainText.isBlank()) return@mapNotNull null
+            LyricLineUi(
+                startTimeMs = minute * 60_000 + second * 1_000 + fraction,
+                mainText = mainText,
+            )
+        }
+        .sortedBy { it.startTimeMs }
+        .toList()
+}
+
+internal fun parseNeteaseYrcLines(
+    primaryLyric: String,
+    translationLyric: String = "",
+    romanizedLyric: String = "",
+): List<LyricLineUi> {
+    if (primaryLyric.isBlank()) return emptyList()
+    val translations = parsePlainLrcLines(translationLyric).associateBy { it.startTimeMs }
+    val romanized = parsePlainLrcLines(romanizedLyric).associateBy { it.startTimeMs }
+    return primaryLyric.lineSequence()
+        .mapNotNull { rawLine ->
+            val line = rawLine.trim()
+            if (line.isBlank() || line.startsWith("{")) return@mapNotNull null
+            val match = yrcLinePattern.find(line) ?: return@mapNotNull null
+            val startTimeMs = match.groupValues[1].toLongOrNull() ?: return@mapNotNull null
+            val content = match.groupValues[3]
+            val words = yrcWordPattern.findAll(content)
+                .mapNotNull { wordMatch ->
+                    val offsetMs = wordMatch.groupValues[1].toLongOrNull() ?: return@mapNotNull null
+                    val durationMs = wordMatch.groupValues[2].toLongOrNull() ?: return@mapNotNull null
+                    val text = wordMatch.groupValues[4]
+                    if (text.isBlank()) return@mapNotNull null
+                    LyricWordUi(
+                        text = text,
+                        startTimeMs = startTimeMs + offsetMs,
+                        endTimeMs = startTimeMs + offsetMs + durationMs,
+                    )
+                }
+                .toList()
+            val parsedText = words.joinToString(separator = "") { word -> word.text }
+                .trim()
+                .ifBlank {
+                    content.replace(Regex("""\(\d+,\d+,\d+\)"""), "").trim()
+                }
+            if (parsedText.isBlank()) return@mapNotNull null
+            LyricLineUi(
+                startTimeMs = startTimeMs,
+                mainText = parsedText,
+                translation = translations[startTimeMs]?.mainText.orEmpty(),
+                romanized = romanized[startTimeMs]?.mainText.orEmpty(),
+                words = words,
+            )
+        }
+        .sortedBy { it.startTimeMs }
+        .toList()
+}
+
+internal fun parseTimedLyricLines(
+    primaryLyric: String,
+    translationLyric: String = "",
+    romanizedLyric: String = "",
+): List<LyricLineUi> {
+    if (primaryLyric.isBlank()) return emptyList()
+    val translations = parsePlainLrcLines(translationLyric).associateBy { it.startTimeMs }
+    val romanized = parsePlainLrcLines(romanizedLyric).associateBy { it.startTimeMs }
+    return primaryLyric.lineSequence()
+        .mapNotNull { rawLine ->
+            val line = rawLine.trim()
+            if (line.isBlank()) return@mapNotNull null
+            val match = timedLyricLinePattern.find(line) ?: return@mapNotNull null
+            val startTimeMs = match.groupValues[1].toLongOrNull() ?: return@mapNotNull null
+            val content = match.groupValues[3]
+            val words = timedLyricWordPattern.findAll(content)
+                .mapNotNull { wordMatch ->
+                    val text = wordMatch.groupValues[1]
+                    val offsetMs = wordMatch.groupValues[2].toLongOrNull() ?: return@mapNotNull null
+                    val durationMs = wordMatch.groupValues[3].toLongOrNull() ?: return@mapNotNull null
+                    if (text.isBlank()) return@mapNotNull null
+                    LyricWordUi(
+                        text = text,
+                        startTimeMs = startTimeMs + offsetMs,
+                        endTimeMs = startTimeMs + offsetMs + durationMs,
+                    )
+                }
+                .toList()
+            val text = words.joinToString(separator = "") { word -> word.text }
+                .trim()
+                .ifBlank { content.trim() }
+            if (text.isBlank()) return@mapNotNull null
+            LyricLineUi(
+                startTimeMs = startTimeMs,
+                mainText = text,
+                translation = translations[startTimeMs]?.mainText.orEmpty(),
+                romanized = romanized[startTimeMs]?.mainText.orEmpty(),
+                words = words,
+            )
+        }
+        .sortedBy { it.startTimeMs }
+        .toList()
+}
+
+internal fun parseTtmlLyricBody(body: String): List<LyricLineUi> {
+    if (body.isBlank()) return emptyList()
+    return ttmlLinePattern.findAll(body).mapNotNull { match ->
+        val attrs = extractXmlAttributes(match.groupValues[1])
+        val content = match.groupValues[2]
+        val spans = ttmlSpanPattern.findAll(content).toList()
+        val words = spans.mapNotNull { span ->
+            val spanAttrs = extractXmlAttributes(span.groupValues[1])
+            val role = spanAttrs["ttm:role"].orEmpty()
+            if (role == "x-translation" || role == "x-roman" || role == "x-bg") return@mapNotNull null
+            val startTime = parseTtmlTimeValue(spanAttrs["begin"]) ?: return@mapNotNull null
+            val endTime = parseTtmlTimeValue(spanAttrs["end"])?.coerceAtLeast(startTime) ?: startTime
+            val text = stripXmlText(span.groupValues[2]).trim()
+            if (text.isBlank()) return@mapNotNull null
+            LyricWordUi(
+                text = text,
+                startTimeMs = startTime,
+                endTimeMs = endTime,
+            )
+        }
+        val mainText = words.joinToString(separator = "") { it.text }
+            .ifBlank {
+                stripXmlText(
+                    content.replace(ttmlTranslationPattern, "").replace(ttmlRomanizedPattern, ""),
+                ).trim()
+            }
+        if (mainText.isBlank()) return@mapNotNull null
+        val startTimeMs = parseTtmlTimeValue(attrs["begin"])
+            ?: words.firstOrNull()?.startTimeMs
+            ?: return@mapNotNull null
+        LyricLineUi(
+            startTimeMs = startTimeMs,
+            mainText = mainText,
+            translation = ttmlTranslationPattern.find(content)?.groupValues?.getOrNull(1)?.let(::stripXmlText).orEmpty(),
+            romanized = ttmlRomanizedPattern.find(content)?.groupValues?.getOrNull(1)?.let(::stripXmlText).orEmpty(),
+            words = words,
+        )
+    }.sortedBy { it.startTimeMs }.toList()
+}
+
+private fun extractXmlAttributes(raw: String): Map<String, String> {
+    return ttmlAnyAttributePattern.findAll(raw).associate { match ->
+        match.groupValues[1] to match.groupValues[2]
+    }
+}
+
+private fun parseTtmlTimeValue(rawValue: String?): Long? {
+    val value = rawValue?.trim().orEmpty()
+    if (value.isBlank()) return null
+    val match = Regex("""(?:(\d+):)?(\d+):(\d+)\.(\d+)""").matchEntire(value) ?: return null
+    val hours = match.groupValues.getOrNull(1).orEmpty().toLongOrNull() ?: 0L
+    val minutes = match.groupValues[2].toLongOrNull() ?: 0L
+    val seconds = match.groupValues[3].toLongOrNull() ?: 0L
+    val millis = match.groupValues[4].padEnd(3, '0').take(3).toLongOrNull() ?: 0L
+    return hours * 3_600_000L + minutes * 60_000L + seconds * 1_000L + millis
+}
+
+private fun stripXmlText(text: String): String {
+    return text.replace(Regex("""<[^>]+>"""), "").replace(Regex("""\s+"""), " ").trim()
+}
+
+internal fun extractFirstJsonEnvelope(rawBody: String): String {
+    val body = rawBody.trim()
+    if (body.isBlank()) return body
+    val opening = body.first()
+    if (opening != '{' && opening != '[') return body
+
+    var objectDepth = 0
+    var arrayDepth = 0
+    var inString = false
+    var escapeNext = false
+
+    body.forEachIndexed { index, char ->
+        when {
+            escapeNext -> escapeNext = false
+            char == '\\' && inString -> escapeNext = true
+            char == '"' -> inString = !inString
+            inString -> Unit
+            char == '{' -> objectDepth += 1
+            char == '}' -> {
+                objectDepth -= 1
+                if (opening == '{' && objectDepth == 0 && arrayDepth == 0) {
+                    return body.substring(0, index + 1)
+                }
+            }
+            char == '[' -> arrayDepth += 1
+            char == ']' -> {
+                arrayDepth -= 1
+                if (opening == '[' && arrayDepth == 0 && objectDepth == 0) {
+                    return body.substring(0, index + 1)
+                }
+            }
+        }
+    }
+    return body
+}
+
+private val lyricMetadataKeywords = listOf(
+    "作词",
+    "作曲",
+    "编曲",
+    "和声",
+    "混音",
+    "母带",
+    "监制",
+    "出品",
+    "发行",
+    "录音",
+    "歌词提供",
+    "翻译提供",
+    "lyrics",
+    "lyrics by",
+    "lyricist",
+    "composer",
+    "arranger",
+    "mixing",
+    "mastering",
+    "lyrics provider",
+    "lyric provider",
+    "translation provider",
+    "cloud drive",
+)
+
+private val lyricMetadataSeparators = setOf(':', '：', '-', ' ', '\t', '/', '|', '(', '（', '[')
+
+internal fun normalizeLyricLineText(text: String): String {
+    return text.replace(Regex("""\s+"""), " ").trim()
+}
+
+internal fun looksLikeLyricMetadataLine(text: String): Boolean {
+    val normalized = normalizeLyricLineText(text)
+    if (normalized.isBlank()) return false
+    val lowered = normalized.lowercase()
+    if (lowered.contains("cloud drive")) return true
+    if (lowered.contains("lyrics provider") || lowered.contains("translation provider")) return true
+    return lyricMetadataKeywords.any { keyword ->
+        val loweredKeyword = keyword.lowercase()
+        lowered == loweredKeyword ||
+            (
+                lowered.startsWith(loweredKeyword) &&
+                    lowered
+                        .getOrNull(loweredKeyword.length)
+                        ?.let { separator -> separator in lyricMetadataSeparators }
+                        ?: true
+            )
+    }
+}
+
+internal fun stripLeadingAndTrailingLyricMetadata(
+    lines: List<LyricLineUi>,
+    scanLimit: Int = 12,
+): List<LyricLineUi> {
+    if (lines.isEmpty()) return emptyList()
+    val cleanedLines = lines.mapNotNull { line ->
+        val mainText = normalizeLyricLineText(line.mainText)
+        if (mainText.isBlank()) {
+            null
+        } else {
+            line.copy(
+                mainText = mainText,
+                translation = normalizeLyricLineText(line.translation),
+                romanized = normalizeLyricLineText(line.romanized),
+            )
+        }
+    }
+    if (cleanedLines.isEmpty()) return emptyList()
+
+    var startIndex = 0
+    val headBoundary = minOf(scanLimit, cleanedLines.size)
+    while (startIndex < headBoundary && looksLikeLyricMetadataLine(cleanedLines[startIndex].mainText)) {
+        startIndex += 1
+    }
+
+    var endIndex = cleanedLines.size
+    val tailBoundary = maxOf(startIndex, cleanedLines.size - scanLimit)
+    while (endIndex > tailBoundary && looksLikeLyricMetadataLine(cleanedLines[endIndex - 1].mainText)) {
+        endIndex -= 1
+    }
+
+    return cleanedLines
+        .subList(startIndex, endIndex)
+        .distinctBy { line ->
+            Triple(line.startTimeMs, line.mainText, "${line.translation}|${line.romanized}")
+        }
+}
+
+private fun sanitizeLyricLines(lines: List<LyricLineUi>): List<LyricLineUi> {
+    return stripLeadingAndTrailingLyricMetadata(lines)
+}
+
+private fun JsonElement.toPlaylistItem(): PlaylistItem? {
+    val item = obj
+    val id = item.long("id")
+    val name = item.string("name")
+    if (id <= 0L || name.isBlank()) return null
+    return PlaylistItem(
+        id = id,
+        name = name,
+        coverUrl = item.string("picUrl").ifBlank { item.string("coverImgUrl") },
+        trackCount = item.int("trackCount").takeIf { it > 0 } ?: item.int("programCount"),
+        creatorUserId = item.obj("creator").long("userId").takeIf { it > 0L } ?: item.long("userId"),
+    )
+}
+
+private fun List<PlaylistItem>.resolveLikedPlaylist(currentUserId: Long): PlaylistItem? {
+    if (isEmpty()) return null
+    return firstOrNull { playlist ->
+        playlist.creatorUserId == currentUserId &&
+            (playlist.name == "我喜欢的音乐" || playlist.name.contains("喜欢的音乐"))
+    } ?: firstOrNull { playlist ->
+        playlist.creatorUserId == currentUserId
+    } ?: firstOrNull()
+}
+
+private fun JsonElement.toAlbumItem(): AlbumItem? {
+    val item = obj
+    val id = item.long("id")
+    val name = item.string("name")
+    if (id <= 0L || name.isBlank()) return null
+    val artistName = item.obj("artist").string("name")
+        .ifBlank { item.array("artists").firstOrNull()?.let { it.obj.string("name") }.orEmpty() }
+    return AlbumItem(
+        id = id,
+        name = name,
+        coverUrl = item.string("picUrl"),
+        artistName = artistName,
+        trackCount = item.int("size"),
+    )
+}
+
+private fun JsonElement.toArtistItem(): ArtistItem? {
+    val item = obj
+    val id = item.long("id")
+    val name = item.string("name")
+    if (id <= 0L || name.isBlank()) return null
+    return ArtistItem(
+        id = id,
+        name = name,
+        coverUrl = item.string("img1v1Url").ifBlank { item.string("picUrl") },
+        musicSize = item.int("musicSize"),
+    )
+}
+
+private fun JsonElement.toRadioItem(): RadioItem? {
+    val item = obj
+    val id = item.long("id")
+    val name = item.string("name")
+    if (id <= 0L || name.isBlank()) return null
+    return RadioItem(
+        id = id,
+        name = name,
+        coverUrl = item.string("picUrl").ifBlank { item.string("coverUrl") },
+        programCount = item.int("programCount"),
+        description = item.string("desc").ifBlank { item.string("rcmdtext") },
+    )
+}
+
+private fun JsonElement.toRadioProgramTrack(): TrackItem? {
+    val item = obj
+    val mainSong = item.obj("mainSong")
+    val id = item.long("id").takeIf { it > 0L } ?: mainSong.long("id")
+    if (id <= 0L) return null
+    val album = mainSong.obj("album")
+    val artists = mainSong.array("artists").joinToString(" / ") { artist -> artist.obj.string("name") }
+        .ifBlank { item.obj("dj").string("nickname") }
+    return TrackItem(
+        id = id,
+        name = mainSong.string("name").ifBlank { item.string("name") },
+        artists = artists.ifBlank { "播客节目" },
+        album = album.string("name").ifBlank { item.obj("dj").string("brand") },
+        coverUrl = item.string("coverUrl").ifBlank { album.string("picUrl") },
+        durationMs = mainSong.long("duration").takeIf { it > 0L } ?: item.long("duration"),
+        keyword = listOf(
+            mainSong.string("name").ifBlank { item.string("name") },
+            artists,
+        ).joinToString(" "),
+    )
+}
+
+private fun JsonObject.toUserAccount(profile: JsonObject = this): UserAccountUi? {
+    val userId = long("id").takeIf { it > 0L } ?: long("userId").takeIf { it > 0L } ?: profile.long("id")
+        .takeIf { it > 0L } ?: profile.long("userId").takeIf { it > 0L } ?: return null
+    return UserAccountUi(
+        userId = userId,
+        nickname = profile.string("nickname").ifBlank { string("nickname") },
+        avatarUrl = profile.string("avatarUrl").ifBlank { string("avatarUrl") },
+        backgroundUrl = profile.string("backgroundUrl").ifBlank { string("backgroundUrl") },
+        signature = profile.string("signature").ifBlank { string("signature") },
+        level = int("level").takeIf { it > 0 } ?: profile.int("level"),
+        followCount = profile.int("follows"),
+        followerCount = profile.int("followeds"),
+        listenCount = int("listenSongs").takeIf { it > 0 } ?: profile.int("listenSongs"),
+    )
+}
+
+private val JsonElement.obj: JsonObject
+    get() = this as? JsonObject ?: JsonObject(emptyMap())
+
+private fun JsonObject.obj(key: String): JsonObject = this[key] as? JsonObject ?: JsonObject(emptyMap())
+
+private fun JsonObject.array(key: String): List<JsonElement> = (this[key] as? JsonArray)?.toList().orEmpty()
+
+private fun JsonObject.string(key: String): String = (this[key] as? JsonPrimitive)?.contentOrNull.orEmpty()
+
+private fun JsonObject.long(key: String): Long = (this[key] as? JsonPrimitive)?.longOrNull ?: 0L
+
+private fun JsonObject.int(key: String): Int = (this[key] as? JsonPrimitive)?.intOrNull ?: 0
+
+private fun JsonObject.boolean(key: String): Boolean = (this[key] as? JsonPrimitive)?.booleanOrNull ?: false

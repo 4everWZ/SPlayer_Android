@@ -46,6 +46,24 @@ android/local.properties
 android/app/src/main/assets/public/
 android/app/src/main/assets/capacitor.config.json
 android/app/src/main/assets/capacitor.plugins.json
+android-native/.gradle/
+android-native/**/build/
+android-native/local.properties
+
+# ADB / UI 调试产物
+android-native-*.png
+android-native-*.xml
+android-native-*.log
+native-*.png
+native-*.xml
+native-*.log
+.codex-*.png
+.codex-*.xml
+.codex-*.log
+lyrics-ui.xml
+player-ui.xml
+native-ui.xml
+.gradle-user/*
 
 # AI
 .trae/*

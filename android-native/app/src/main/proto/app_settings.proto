@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+option java_package = "top.imsyy.splayer.nativeapp";
+option java_multiple_files = true;
+
+message AppSettingsProto {
+  string api_root = 1;
+  string music_u = 2;
+  string csrf = 3;
+  string nmtid = 4;
+  string account_id = 5;
+  string account_nickname = 6;
+  int32 play_mode = 7;
+  bool show_translation = 8;
+  bool show_roma = 9;
+  bool auto_play = 10;
+  bool show_queue_count = 11;
+  int32 lyric_font_scale = 12;
+  string account_avatar_url = 13;
+  int32 theme_mode = 14;
+}

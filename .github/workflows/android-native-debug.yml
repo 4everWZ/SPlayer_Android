@@ -1,0 +1,31 @@
+name: Build Android Native V2 Debug APK
+
+on:
+  push:
+    branches:
+      - "**"
+  workflow_dispatch:
+
+jobs:
+  build-android-native-debug:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: gradle
+
+      - name: Build native debug APK
+        working-directory: android-native
+        run: ./gradlew assembleDebug
+
+      - name: Upload native APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: splayer-native-v2-debug-apk
+          path: android-native/app/build/outputs/apk/debug/app-debug.apk
