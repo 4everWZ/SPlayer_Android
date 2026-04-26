@@ -444,68 +444,22 @@ const lrcAllLeave = () => {
 
 type CssVars = Record<`--${string}`, string>;
 
-/** 逐字歌词淡入淡出因子 */
-const YRC_DIM_ALPHA = 0.3;
-/** 逐字歌词淡入淡出时间 */
-const YRC_LINE_FADE_MS = 250;
-/** 淡入淡出行索引 */
-const yrcFadingLineIndex = ref<number | null>(null);
-/** 淡入淡出结束时间 */
-const yrcFadingUntilAt = ref<number>(0);
-
-/**
- * 获取逐字歌词淡入淡出因子
- * @param index 歌词行索引
- */
-const getYrcFadeFactor = (index: number): number => {
-  if (yrcFadingLineIndex.value !== index) return 1;
-  const now = Date.now();
-  if (now >= yrcFadingUntilAt.value) return 1;
-  const remain = yrcFadingUntilAt.value - now;
-  return Math.min(Math.max(remain / YRC_LINE_FADE_MS, 0), 1);
-};
-
 /**
  * 获取逐字歌词样式变量
- * @param wordData 逐字歌词数据
  * @param lyricIndex 歌词行索引
  */
-const getYrcVars = (wordData: LyricWord, lyricIndex: number): CssVars => {
-  const currentSeek = props.currentTime;
-  const fadeFactor = getYrcFadeFactor(lyricIndex);
+const getYrcVars = (_wordData: LyricWord, lyricIndex: number): CssVars => {
   // 判断是否显示
   const currentLineItem = processedLyrics.value[lyricIndex];
   if (!currentLineItem || currentLineItem.type !== "lyric") return {};
 
   if (!isYrcLineOn(lyricIndex)) return {};
-  // 计算进度
-  const duration = wordData.endTime - wordData.startTime;
-  const safeDuration = Math.max(duration, 1);
-  const rawProgress = (currentSeek - wordData.startTime) / safeDuration;
-  const progress = Math.min(Math.max(rawProgress, 0), 1); // Allow > 1 for latching
-  const maskX = `${(1 - Math.min(progress, 1)) * 100}%`;
-  // 计算透明度
-  const hasStarted = currentSeek >= wordData.startTime;
-  const brightAlpha = hasStarted ? YRC_DIM_ALPHA + (1 - YRC_DIM_ALPHA) * fadeFactor : YRC_DIM_ALPHA;
-  const darkAlpha = YRC_DIM_ALPHA;
-
-  // 计算每个字的动态变换效果
-  // Calculate dynamic transform for each word
-  let transform = "scale(1)";
-  if (progress > 0) {
-    // 随着播放进度逐渐放大并上浮
-    // Gradually scale up and float up with playback progress
-    const scale = 1 + 0.08 * progress;
-    const y = -2 * progress;
-    transform = `scale(${scale}) translateY(${y}px)`;
-  }
 
   return {
-    "--yrc-mask-x": maskX,
+    "--yrc-mask-x": "0%",
     "--yrc-opacity": "1",
-    "--yrc-bright-alpha": `${brightAlpha}`,
-    "--yrc-dark-alpha": `${darkAlpha}`,
-    "--yrc-transform": transform,
+    "--yrc-bright-alpha": "1",
+    "--yrc-dark-alpha": "1",
   };
 };
 
@@ -514,9 +468,7 @@ const getYrcVars = (wordData: LyricWord, lyricIndex: number): CssVars => {
  * @param index 歌词行索引
  */
 const isYrcLineOn = (index: number): boolean => {
-  const isActive = isLineActive(index);
-  const isFading = yrcFadingLineIndex.value === index && Date.now() < yrcFadingUntilAt.value;
-  return isActive || isFading;
+  return isLineActive(index);
 };
 
 /**
@@ -574,12 +526,8 @@ const jumpSeek = (time: number) => {
 };
 
 // 监听歌词滚动
-watch(firstActiveIndex, (val, oldVal) => {
+watch(firstActiveIndex, (val) => {
   lyricsScroll(val);
-  if (typeof oldVal === "number" && oldVal >= 0 && oldVal !== val) {
-    yrcFadingLineIndex.value = oldVal;
-    yrcFadingUntilAt.value = Date.now() + YRC_LINE_FADE_MS;
-  }
 });
 
 onMounted(() => {

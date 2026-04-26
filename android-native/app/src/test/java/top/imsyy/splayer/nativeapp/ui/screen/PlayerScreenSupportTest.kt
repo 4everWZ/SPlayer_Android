@@ -450,7 +450,7 @@ class PlayerScreenSupportTest {
     }
 
     @Test
-    fun `buildLyricAnnotatedText emits per glyph highlight spans when current line has timed words`() {
+    fun `buildLyricAnnotatedText keeps current word line as a whole highlighted sentence`() {
         val annotated = buildLyricAnnotatedText(
             line = top.imsyy.splayer.nativeapp.model.LyricLineUi(
                 startTimeMs = 0L,
@@ -476,7 +476,7 @@ class PlayerScreenSupportTest {
         )
 
         assertEquals("风吹", annotated.text)
-        assertTrue(annotated.spanStyles.size >= 2)
+        assertTrue(annotated.spanStyles.isEmpty())
     }
 
     @Test

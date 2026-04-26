@@ -4,6 +4,7 @@ import java.util.LinkedHashMap
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlinx.coroutines.CompletableDeferred
@@ -530,10 +531,6 @@ class SPlayerRemoteRepository @Inject constructor(
             val tlyric = response.obj("tlyric").string("lyric")
             val romalrc = response.obj("romalrc").string("lyric")
             val officialWordLyrics = parseNeteaseYrc(yrc, ytlrc, yromalrc)
-            if (officialWordLyrics.isNotEmpty()) {
-                return@awaitInFlight sanitizeLyricLines(officialWordLyrics).also { lyricCache[track.id] = it }
-            }
-
             val plainLyrics = parseLyric(lrc, tlyric, romalrc)
             val ttmlLyrics = parseTtmlLyric(track.id)
             if (ttmlLyrics.isNotEmpty()) {
@@ -543,6 +540,10 @@ class SPlayerRemoteRepository @Inject constructor(
             val qqLyrics = parseQQMusicLyric(track)
             if (qqLyrics.isNotEmpty()) {
                 return@awaitInFlight sanitizeLyricLines(qqLyrics).also { lyricCache[track.id] = it }
+            }
+
+            if (officialWordLyrics.isNotEmpty()) {
+                return@awaitInFlight sanitizeLyricLines(officialWordLyrics).also { lyricCache[track.id] = it }
             }
 
             sanitizeLyricLines(plainLyrics).also { lyricCache[track.id] = it }
@@ -827,12 +828,12 @@ private fun JsonElement.toTrackItem(): TrackItem? {
         romanizedLyric: String,
     ): List<LyricLineUi> {
         if (primaryLyric.isBlank()) return emptyList()
-        val translations = parsePlainLrcLines(translationLyric).associateBy { it.startTimeMs }
-        val romanized = parsePlainLrcLines(romanizedLyric).associateBy { it.startTimeMs }
+        val translations = parsePlainLrcLines(translationLyric)
+        val romanized = parsePlainLrcLines(romanizedLyric)
         return parsePlainLrcLines(primaryLyric).map { line ->
             line.copy(
-                translation = translations[line.startTimeMs]?.mainText.orEmpty(),
-                romanized = romanized[line.startTimeMs]?.mainText.orEmpty(),
+                translation = findAlignedSupplementLyricText(line.startTimeMs, translations).ifBlank { line.translation },
+                romanized = findAlignedSupplementLyricText(line.startTimeMs, romanized).ifBlank { line.romanized },
             )
         }
     }
@@ -873,6 +874,11 @@ private fun JsonElement.toTrackItem(): TrackItem? {
                 ),
             )
         }.getOrNull() ?: return emptyList()
+        val responseCode = response.int("code")
+        if (responseCode != 0 && responseCode != 200) return emptyList()
+        if (!isMatchedLyricDurationCompatible(track.durationMs, response.obj("song").long("duration"))) {
+            return emptyList()
+        }
         val qrcLyrics = parseTimedLyric(
             primaryLyric = extractQrcContent(response.string("qrc")),
             translationLyric = response.string("trans"),
@@ -913,7 +919,13 @@ private fun JsonElement.toTrackItem(): TrackItem? {
     private fun now(): String = System.currentTimeMillis().toString()
 }
 
-private val plainLrcPattern = Regex("""\[(\d+):(\d+)(?:\.(\d+))?](.*)$""")
+private data class PlainLrcEvent(
+    val startTimeMs: Long,
+    val text: String,
+    val order: Int,
+)
+
+private val plainLrcTimeTagPattern = Regex("""\[(\d+):(\d+)(?:[.:](\d+))?]""")
 private val yrcLinePattern = Regex("""^\[(\d+),(\d+)](.*)$""")
 private val yrcWordPattern = Regex("""\((\d+),(\d+),(\d+)\)([^()]*)""")
 private val timedLyricLinePattern = Regex("""\[(\d+),(\d+)](.*)$""")
@@ -923,40 +935,114 @@ private val ttmlSpanPattern = Regex("""<span\b([^>]*)>(.*?)</span>""", RegexOpti
 private val ttmlTranslationPattern = Regex("""<span\b[^>]*ttm:role="(?:x-translation|x-bg)"[^>]*>(.*?)</span>""", RegexOption.DOT_MATCHES_ALL)
 private val ttmlRomanizedPattern = Regex("""<span\b[^>]*ttm:role="x-roman"[^>]*>(.*?)</span>""", RegexOption.DOT_MATCHES_ALL)
 private val ttmlAnyAttributePattern = Regex("""([A-Za-z:]+)="([^"]*)"""")
+private const val LYRIC_ALIGN_TOLERANCE_MS = 300L
+private const val LYRIC_MATCH_DURATION_TOLERANCE_MS = 5_000L
+
+internal fun findAlignedSupplementLyricText(
+    startTimeMs: Long,
+    supplementLines: List<LyricLineUi>,
+    toleranceMs: Long = LYRIC_ALIGN_TOLERANCE_MS,
+): String {
+    if (supplementLines.isEmpty()) return ""
+    val nearest = supplementLines.minByOrNull { line -> abs(line.startTimeMs - startTimeMs) } ?: return ""
+    return nearest
+        .takeIf { line -> abs(line.startTimeMs - startTimeMs) <= toleranceMs }
+        ?.mainText
+        .orEmpty()
+}
+
+internal fun isMatchedLyricDurationCompatible(
+    trackDurationMs: Long,
+    matchedDurationMs: Long,
+    toleranceMs: Long = LYRIC_MATCH_DURATION_TOLERANCE_MS,
+): Boolean {
+    if (trackDurationMs <= 0L || matchedDurationMs <= 0L) return true
+    return abs(trackDurationMs - matchedDurationMs) <= toleranceMs
+}
+
+internal fun resolveQrcWordStartTimeMs(
+    lineStartTimeMs: Long,
+    rawWordStartTimeMs: Long,
+): Long {
+    return if (rawWordStartTimeMs >= lineStartTimeMs) {
+        rawWordStartTimeMs
+    } else {
+        lineStartTimeMs + rawWordStartTimeMs
+    }
+}
 
 internal fun parsePlainLrcLines(content: String): List<LyricLineUi> {
-    val rawLines = content.lineSequence()
-        .mapNotNull { raw ->
+    val rawEvents = buildList {
+        var order = 0
+        content.lineSequence().forEach { raw ->
             val line = raw.trim()
-            val match = plainLrcPattern.find(line) ?: return@mapNotNull null
-            val minute = match.groupValues[1].toLongOrNull() ?: return@mapNotNull null
-            val second = match.groupValues[2].toLongOrNull() ?: return@mapNotNull null
-            val fraction = match.groupValues.getOrNull(3).orEmpty().padEnd(3, '0').take(3).toLongOrNull() ?: 0L
-            val mainText = match.groupValues[4].trim()
-            if (mainText.isBlank()) return@mapNotNull null
-            LyricLineUi(
-                startTimeMs = minute * 60_000 + second * 1_000 + fraction,
-                mainText = mainText,
-            )
+            val matches = plainLrcTimeTagPattern.findAll(line).toList()
+            if (matches.isEmpty()) return@forEach
+            val mainText = line.replace(plainLrcTimeTagPattern, "").trim()
+            if (mainText.isBlank()) return@forEach
+            matches.forEach { match ->
+                val minute = match.groupValues[1].toLongOrNull() ?: return@forEach
+                val second = match.groupValues[2].toLongOrNull() ?: return@forEach
+                val fraction = match.groupValues.getOrNull(3).orEmpty().padEnd(3, '0').take(3).toLongOrNull() ?: 0L
+                add(
+                    PlainLrcEvent(
+                        startTimeMs = minute * 60_000 + second * 1_000 + fraction,
+                        text = mainText,
+                        order = order,
+                    ),
+                )
+                order += 1
+            }
         }
-        .sortedBy { it.startTimeMs }
-        .toList()
+    }.sortedWith(compareBy<PlainLrcEvent> { it.startTimeMs }.thenBy { it.order })
 
-    if (rawLines.isEmpty()) return emptyList()
+    if (rawEvents.isEmpty()) return emptyList()
 
-    return rawLines.mapIndexed { index, line ->
-        val nextStart = rawLines.getOrNull(index + 1)?.startTimeMs ?: (line.startTimeMs + 10_000L)
-        line.copy(
-            endTimeMs = nextStart.coerceAtLeast(line.startTimeMs),
-            words = listOf(
-                LyricWordUi(
-                    text = line.mainText,
-                    startTimeMs = line.startTimeMs,
-                    endTimeMs = nextStart.coerceAtLeast(line.startTimeMs),
+    val grouped = rawEvents.groupBy { it.startTimeMs }.entries.toList()
+    return grouped.flatMapIndexed { index, group ->
+        val startTimeMs = group.key
+        val nextStart = grouped.getOrNull(index + 1)?.key ?: (startTimeMs + 10_000L)
+        val endTimeMs = nextStart.coerceAtLeast(startTimeMs)
+        val textEvents = group.value.sortedBy { it.order }.filter { it.text.isNotBlank() }
+        if (textEvents.isEmpty()) {
+            emptyList()
+        } else {
+            val base = LyricLineUi(
+                startTimeMs = startTimeMs,
+                endTimeMs = endTimeMs,
+                mainText = textEvents[0].text,
+                translation = textEvents.getOrNull(1)?.text.orEmpty(),
+                romanized = textEvents.getOrNull(2)?.text.orEmpty(),
+                words = listOf(
+                    LyricWordUi(
+                        text = textEvents[0].text,
+                        startTimeMs = startTimeMs,
+                        endTimeMs = endTimeMs,
+                    ),
                 ),
-            ),
-            hasWordTiming = false,
-        )
+                hasWordTiming = false,
+            )
+            buildList {
+                add(base)
+                textEvents.drop(3).forEach { event ->
+                    add(
+                        LyricLineUi(
+                            startTimeMs = startTimeMs,
+                            endTimeMs = endTimeMs,
+                            mainText = event.text,
+                            words = listOf(
+                                LyricWordUi(
+                                    text = event.text,
+                                    startTimeMs = startTimeMs,
+                                    endTimeMs = endTimeMs,
+                                ),
+                            ),
+                            hasWordTiming = false,
+                        ),
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -966,8 +1052,8 @@ internal fun parseNeteaseYrcLines(
     romanizedLyric: String = "",
 ): List<LyricLineUi> {
     if (primaryLyric.isBlank()) return emptyList()
-    val translations = parsePlainLrcLines(translationLyric).associateBy { it.startTimeMs }
-    val romanized = parsePlainLrcLines(romanizedLyric).associateBy { it.startTimeMs }
+    val translations = parsePlainLrcLines(translationLyric)
+    val romanized = parsePlainLrcLines(romanizedLyric)
     return primaryLyric.lineSequence()
         .mapNotNull { rawLine ->
             val line = rawLine.trim()
@@ -1000,8 +1086,8 @@ internal fun parseNeteaseYrcLines(
                 startTimeMs = startTimeMs,
                 endTimeMs = maxOf(startTimeMs + lineDurationMs, lastWordEndTimeMs, startTimeMs),
                 mainText = parsedText,
-                translation = translations[startTimeMs]?.mainText.orEmpty(),
-                romanized = romanized[startTimeMs]?.mainText.orEmpty(),
+                translation = findAlignedSupplementLyricText(startTimeMs, translations),
+                romanized = findAlignedSupplementLyricText(startTimeMs, romanized),
                 words = words,
                 hasWordTiming = true,
             )
@@ -1016,8 +1102,8 @@ internal fun parseTimedLyricLines(
     romanizedLyric: String = "",
 ): List<LyricLineUi> {
     if (primaryLyric.isBlank()) return emptyList()
-    val translations = parsePlainLrcLines(translationLyric).associateBy { it.startTimeMs }
-    val romanized = parsePlainLrcLines(romanizedLyric).associateBy { it.startTimeMs }
+    val translations = parsePlainLrcLines(translationLyric)
+    val romanized = parsePlainLrcLines(romanizedLyric)
     return primaryLyric.lineSequence()
         .mapNotNull { rawLine ->
             val line = rawLine.trim()
@@ -1032,10 +1118,11 @@ internal fun parseTimedLyricLines(
                     val offsetMs = wordMatch.groupValues[2].toLongOrNull() ?: return@mapNotNull null
                     val durationMs = wordMatch.groupValues[3].toLongOrNull() ?: return@mapNotNull null
                     if (text.isBlank()) return@mapNotNull null
+                    val wordStartTimeMs = resolveQrcWordStartTimeMs(startTimeMs, offsetMs)
                     LyricWordUi(
                         text = text,
-                        startTimeMs = startTimeMs + offsetMs,
-                        endTimeMs = startTimeMs + offsetMs + durationMs,
+                        startTimeMs = wordStartTimeMs,
+                        endTimeMs = wordStartTimeMs + durationMs,
                     )
                 }
                 .toList()
@@ -1048,8 +1135,8 @@ internal fun parseTimedLyricLines(
                 startTimeMs = startTimeMs,
                 endTimeMs = maxOf(startTimeMs + lineDurationMs, lastWordEndTimeMs, startTimeMs),
                 mainText = text,
-                translation = translations[startTimeMs]?.mainText.orEmpty(),
-                romanized = romanized[startTimeMs]?.mainText.orEmpty(),
+                translation = findAlignedSupplementLyricText(startTimeMs, translations),
+                romanized = findAlignedSupplementLyricText(startTimeMs, romanized),
                 words = words,
                 hasWordTiming = true,
             )

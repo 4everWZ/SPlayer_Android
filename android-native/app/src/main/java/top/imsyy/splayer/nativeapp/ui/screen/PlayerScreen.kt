@@ -75,7 +75,6 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
@@ -83,8 +82,6 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -141,20 +138,11 @@ fun PlayerScreen(
             )
         }
     }
-    val wordLyricCadenceActive by remember(
-        lyricMode,
-        screenState.lyrics,
-        track?.id,
-    ) {
-        derivedStateOf {
-            lyricMode && hasWordLevelLyric(screenState.lyrics)
-        }
-    }
-    LaunchedEffect(track?.id, lyricMode, wordLyricCadenceActive) {
+    LaunchedEffect(track?.id, lyricMode) {
         viewModel.setPlayerScreenCadence(
             playerScreenActive = true,
             lyricScreenActive = lyricMode,
-            wordLevelLyricActive = wordLyricCadenceActive,
+            wordLevelLyricActive = false,
         )
     }
 
@@ -1056,19 +1044,12 @@ private fun LyricStage(
                         else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.42f)
                     }
                     val upcomingWordColor = when {
-                        previewActive -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.82f)
-                        currentHighlightActive && lineHasWordTiming -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.24f)
-                        currentHighlightActive -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                        previewActive -> MaterialTheme.colorScheme.onSurface
+                        currentHighlightActive -> mainTextColor
                         else -> mainTextColor
-                    }
-                    val highlightPositionKey = if (currentHighlightActive) {
-                        currentPositionMs
-                    } else {
-                        Long.MIN_VALUE
                     }
                     val lyricText = remember(
                         line,
-                        highlightPositionKey,
                         currentActive,
                         scrollMode,
                         previewActive,
@@ -1077,8 +1058,8 @@ private fun LyricStage(
                     ) {
                         buildLyricAnnotatedText(
                             line = line,
-                            currentPositionMs = currentPositionMs,
-                            wordHighlightEnabled = currentHighlightActive,
+                            currentPositionMs = 0L,
+                            wordHighlightEnabled = false,
                             emphasizedColor = mainTextColor,
                             upcomingColor = upcomingWordColor,
                         )
@@ -1765,6 +1746,7 @@ internal fun resolveLyricGlyphProgress(
     return (wordProgress.coerceIn(0f, 1f) * glyphCount - glyphIndex).coerceIn(0f, 1f)
 }
 
+@Suppress("UNUSED_PARAMETER")
 internal fun buildLyricAnnotatedText(
     line: LyricLineUi,
     currentPositionMs: Long,
@@ -1772,53 +1754,7 @@ internal fun buildLyricAnnotatedText(
     emphasizedColor: Color,
     upcomingColor: Color,
 ): AnnotatedString {
-    if (!wordHighlightEnabled) {
-        return AnnotatedString(line.mainText)
-    }
-    if (resolveLyricHighlightMode(line) != LyricHighlightMode.Word) {
-        return AnnotatedString(line.mainText)
-    }
-    return buildAnnotatedString {
-        line.words.forEach { word ->
-            val progress = resolveLyricWordProgress(word, currentPositionMs)
-            val highlightableGlyphs = word.text.indices.filter { index ->
-                !word.text[index].isWhitespace()
-            }
-            if (highlightableGlyphs.isEmpty()) {
-                append(word.text)
-                return@forEach
-            }
-            var highlightCursor = 0
-            word.text.forEachIndexed { _, char ->
-                val charText = char.toString()
-                if (char.isWhitespace()) {
-                    pushStyle(SpanStyle(color = upcomingColor))
-                    append(charText)
-                    pop()
-                    return@forEachIndexed
-                }
-                val glyphProgress = resolveLyricGlyphProgress(
-                    glyphIndex = highlightCursor,
-                    glyphCount = highlightableGlyphs.size,
-                    wordProgress = progress,
-                )
-                val glyphColor = when {
-                    glyphProgress >= 1f -> emphasizedColor
-                    glyphProgress > 0f -> lerp(upcomingColor, emphasizedColor, glyphProgress)
-                    else -> upcomingColor
-                }
-                pushStyle(
-                    SpanStyle(
-                        color = glyphColor,
-                        fontWeight = if (glyphProgress > 0f) FontWeight.Bold else FontWeight.Normal,
-                    ),
-                )
-                append(charText)
-                pop()
-                highlightCursor += 1
-            }
-        }
-    }
+    return AnnotatedString(line.mainText)
 }
 
 private fun androidx.compose.foundation.lazy.LazyListLayoutInfo.centeredVisibleLyricIndex(

@@ -750,6 +750,57 @@ class SPlayerRemoteRepositoryTest {
     }
 
     @Test
+    fun `fetchLyrics prefers ttml word lyrics over official yrc to match desktop auto priority`() = runBlocking {
+        val repository = SPlayerRemoteRepository(
+            api = FakeApiService(
+                responses = mapOf(
+                    "netease/lyric/new" to """
+                        {
+                          "code": 200,
+                          "lrc": { "lyric": "[00:00.000]普通歌词" },
+                          "tlyric": { "lyric": "[00:00.000]普通翻译" },
+                          "romalrc": { "lyric": "" },
+                          "yrc": { "lyric": "[0,3000](0,500,0)官(500,500,0)方(1000,500,0)词" },
+                          "ytlrc": { "lyric": "" },
+                          "yromalrc": { "lyric": "" }
+                        }
+                    """.trimIndent(),
+                    "netease/lyric/ttml" to """
+                        <?xml version="1.0" encoding="utf-8"?>
+                        <tt xmlns="http://www.w3.org/ns/ttml" xmlns:ttm="http://www.w3.org/ns/ttml#metadata">
+                          <body>
+                            <div>
+                              <p begin="00:00.000" end="00:03.000">
+                                <span begin="00:00.000" end="00:00.400">桌</span>
+                                <span begin="00:00.400" end="00:00.800">面</span>
+                                <span begin="00:00.800" end="00:01.200">词</span>
+                                <span ttm:role="x-bg">桌面翻译</span>
+                              </p>
+                            </div>
+                          </body>
+                        </tt>
+                    """.trimIndent(),
+                ),
+            ),
+        )
+
+        val lyrics = repository.fetchLyrics(
+            TrackItem(
+                id = 347233L,
+                name = "TTML 优先歌曲",
+                artists = "测试歌手",
+                album = "测试专辑",
+                coverUrl = "",
+                durationMs = 180000L,
+            ),
+        )
+
+        assertEquals(1, lyrics.size)
+        assertEquals("桌面词", lyrics.first().mainText)
+        assertEquals("桌面翻译", lyrics.first().translation)
+    }
+
+    @Test
     fun `fetchLyrics parses netease yrc markers into readable lines`() = runBlocking {
         val repository = SPlayerRemoteRepository(
             api = FakeApiService(

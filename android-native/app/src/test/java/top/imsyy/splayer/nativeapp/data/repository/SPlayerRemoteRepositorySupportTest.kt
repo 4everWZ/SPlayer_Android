@@ -93,6 +93,19 @@ class SPlayerRemoteRepositorySupportTest {
     }
 
     @Test
+    fun `parseNeteaseYrcLines aligns translated and romanized lyrics within desktop tolerance`() {
+        val result = parseNeteaseYrcLines(
+            primaryLyric = "[28590,1800](28590,280,0)風(28870,240,0)さ(29110,320,0)そう",
+            translationLyric = "[00:28.760]请随风摇曳",
+            romanizedLyric = "[00:28.430]kaze sasou",
+        )
+
+        assertEquals(1, result.size)
+        assertEquals("请随风摇曳", result.first().translation)
+        assertEquals("kaze sasou", result.first().romanized)
+    }
+
+    @Test
     fun `parseNeteaseYrcLines ignores lyric new metadata json rows and keeps timed words for 假如爱有天意`() {
         val result = parseNeteaseYrcLines(
             primaryLyric = """
@@ -137,6 +150,24 @@ class SPlayerRemoteRepositorySupportTest {
     }
 
     @Test
+    fun `parsePlainLrcLines folds same timestamp rows into translation and romanized text like desktop`() {
+        val result = parsePlainLrcLines(
+            """
+            [00:01.000]会えたような二人
+            [00:01.000]最后得以辗转相遇
+            [00:01.000]aeta youna futari
+            [00:06:500]次の行
+            """.trimIndent(),
+        )
+
+        assertEquals(2, result.size)
+        assertEquals("会えたような二人", result.first().mainText)
+        assertEquals("最后得以辗转相遇", result.first().translation)
+        assertEquals("aeta youna futari", result.first().romanized)
+        assertEquals(6_500L, result.first().endTimeMs)
+    }
+
+    @Test
     fun `parseTimedLyricLines keeps qrc word offsets for fallback providers`() {
         val result = parseTimedLyricLines(
             primaryLyric = "[2500,1400]空(0,220)も(220,180)飛べる(400,500)はず(900,320)",
@@ -152,6 +183,27 @@ class SPlayerRemoteRepositorySupportTest {
         assertEquals(2720L, result.first().words[0].endTimeMs)
         assertEquals(3400L, result.first().words[3].startTimeMs)
         assertEquals(3720L, result.first().words[3].endTimeMs)
+    }
+
+    @Test
+    fun `parseTimedLyricLines keeps absolute qrc word timings without adding line start twice`() {
+        val result = parseTimedLyricLines(
+            primaryLyric = "[2500,1400]空(2500,220)も(2720,180)飛べる(2900,500)",
+            translationLyric = "[00:02.650]一定能展翅高飞",
+        )
+
+        assertEquals(1, result.size)
+        assertEquals("一定能展翅高飞", result.first().translation)
+        assertEquals(2500L, result.first().words[0].startTimeMs)
+        assertEquals(2720L, result.first().words[0].endTimeMs)
+        assertEquals(2900L, result.first().words[2].startTimeMs)
+        assertEquals(3400L, result.first().words[2].endTimeMs)
+    }
+
+    @Test
+    fun `matched lyric duration rejects wrong qq music candidate beyond desktop tolerance`() {
+        assertTrue(isMatchedLyricDurationCompatible(180_000L, 184_900L))
+        assertFalse(isMatchedLyricDurationCompatible(180_000L, 186_000L))
     }
 
     @Test
