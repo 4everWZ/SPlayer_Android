@@ -70,6 +70,7 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.scale
@@ -170,12 +171,6 @@ fun PlayerScreen(
         val sliderValue = if (seeking) seekPreviewPosition else playbackState.positionMs.toFloat()
 
         BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-            val stageHeightDp = remember(maxHeight, lyricMode) {
-                resolvePlayerStageHeightDp(
-                    viewportHeightDp = maxHeight.value,
-                    lyricMode = lyricMode,
-                )
-            }
             val bottomSafeGapDp = remember(maxHeight) {
                 resolvePlayerBottomSafeGapDp(maxHeight.value)
             }
@@ -195,7 +190,7 @@ fun PlayerScreen(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(stageHeightDp.dp),
+                        .weight(1f),
                 ) {
                     if (lyricMode) {
                         LyricStage(
@@ -218,19 +213,26 @@ fun PlayerScreen(
                             onOpenComments = viewModel::openCommentsSheet,
                         )
                     }
+
+                    if (lyricMode) {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.BottomStart)
+                                .fillMaxWidth()
+                                .height(resolvePlayerLyricToggleSlotHeightDp().dp),
+                            contentAlignment = Alignment.CenterStart,
+                        ) {
+                            LyricDisplayToggleRow(
+                                showTranslation = screenState.showTranslation,
+                                showRomanized = screenState.showRomanized,
+                                onToggleTranslation = { viewModel.setShowTranslation(!screenState.showTranslation) },
+                                onToggleRomanized = { viewModel.setShowRomanized(!screenState.showRomanized) },
+                            )
+                        }
+                    }
                 }
 
-                if (lyricMode) {
-                    LyricDisplayToggleRow(
-                        showTranslation = screenState.showTranslation,
-                        showRomanized = screenState.showRomanized,
-                        onToggleTranslation = { viewModel.setShowTranslation(!screenState.showTranslation) },
-                        onToggleRomanized = { viewModel.setShowRomanized(!screenState.showRomanized) },
-                    )
-                    Spacer(Modifier.height(resolvePlayerStageToProgressGapDp(lyricMode).dp))
-                } else {
-                    Spacer(Modifier.height(resolvePlayerStageToProgressGapDp(lyricMode).dp))
-                }
+                Spacer(Modifier.height(resolvePlayerStageToProgressGapDp(lyricMode).dp))
 
                 Slider(
                     value = sliderValue.coerceIn(0f, playbackState.durationMs.coerceAtLeast(1L).toFloat()),
@@ -253,19 +255,25 @@ fun PlayerScreen(
                     Text(formatDuration(playbackState.durationMs))
                 }
 
-                if (playbackState.isBuffering) {
-                    Text(
-                        text = "缓冲中，系统进度已冻结",
-                        modifier = Modifier.padding(top = 6.dp),
-                        color = MaterialTheme.colorScheme.primary,
-                        style = MaterialTheme.typography.labelLarge,
-                    )
+                val statusMessage = when {
+                    playbackState.isBuffering -> "缓冲中，系统进度已冻结"
+                    else -> playbackState.errorMessage?.takeIf { it.isNotBlank() }
+                }
+                val statusColor = if (playbackState.isBuffering) {
+                    MaterialTheme.colorScheme.primary
                 } else {
-                    playbackState.errorMessage?.takeIf { it.isNotBlank() }?.let { message ->
+                    MaterialTheme.colorScheme.error
+                }
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(resolvePlayerStatusSlotHeightDp().dp),
+                    contentAlignment = Alignment.CenterStart,
+                ) {
+                    statusMessage?.let { message ->
                         Text(
                             text = message,
-                            modifier = Modifier.padding(top = 6.dp),
-                            color = MaterialTheme.colorScheme.error,
+                            color = statusColor,
                             style = MaterialTheme.typography.labelLarge,
                         )
                     }
@@ -274,7 +282,7 @@ fun PlayerScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(top = 8.dp, bottom = 4.dp),
+                        .padding(top = 0.dp, bottom = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceAround,
                 ) {
@@ -991,6 +999,18 @@ private fun LyricStage(
             LazyColumn(
                 modifier = Modifier
                     .fillMaxSize()
+                    .alpha(
+                        if (
+                            shouldRevealLyricListBeforeFirstCenter(
+                                initialAutoCenterSettled = initialAutoCenterSettled,
+                                mode = scrollMode,
+                            )
+                        ) {
+                            1f
+                        } else {
+                            0f
+                        },
+                    )
                     .pointerInput(lyrics, viewConfiguration) {
                         awaitEachGesture {
                             val down = awaitFirstDown(requireUnconsumed = false)
@@ -1398,8 +1418,13 @@ internal fun resolvePreviewAnchorMainTextScale(
 internal fun resolvePlayerStageToProgressGapDp(
     lyricMode: Boolean,
 ): Float {
-    return if (lyricMode) 6f else 10f
+    val fixedGap = 8f
+    return if (lyricMode) fixedGap else fixedGap
 }
+
+internal fun resolvePlayerLyricToggleSlotHeightDp(): Float = 36f
+
+internal fun resolvePlayerStatusSlotHeightDp(): Float = 26f
 
 internal fun resolveLyricTranslationTextScale(
     lyricFontScale: Float,
@@ -1510,6 +1535,13 @@ internal fun shouldUpdateManualPreviewAnchor(
         centeredIndex != null
 }
 
+internal fun shouldRevealLyricListBeforeFirstCenter(
+    initialAutoCenterSettled: Boolean,
+    mode: LyricScrollMode,
+): Boolean {
+    return initialAutoCenterSettled || mode == LyricScrollMode.ManualPreview
+}
+
 internal data class CoverStageLayout(
     val discSizeDp: Float,
     val compositionSizeDp: Float,
@@ -1573,12 +1605,20 @@ internal fun resolvePlayerStageHeightDp(
     viewportHeightDp: Float,
     lyricMode: Boolean,
 ): Float {
-    val reservedForControls = (if (lyricMode) 264f else 236f) + resolvePlayerBottomSafeGapDp(viewportHeightDp)
-    val minHeight = if (lyricMode) 360f else 380f
+    val reservedForControls = resolvePlayerControlsReserveDp(lyricMode) +
+        resolvePlayerBottomSafeGapDp(viewportHeightDp)
+    val minHeight = 360f
     return (viewportHeightDp - reservedForControls)
         .coerceAtLeast(minHeight.coerceAtMost(viewportHeightDp))
         .roundToInt()
         .toFloat()
+}
+
+internal fun resolvePlayerControlsReserveDp(
+    lyricMode: Boolean,
+): Float {
+    val fixedReserve = 236f
+    return if (lyricMode) fixedReserve else fixedReserve
 }
 
 internal fun resolvePlayerBottomSafeGapDp(

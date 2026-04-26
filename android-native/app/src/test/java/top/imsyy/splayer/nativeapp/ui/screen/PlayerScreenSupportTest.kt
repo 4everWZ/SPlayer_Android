@@ -75,13 +75,21 @@ class PlayerScreenSupportTest {
     }
 
     @Test
-    fun `resolvePlayerStageHeightDp leaves only the compact controls reserve at the bottom`() {
-        assertEquals(360f, resolvePlayerStageHeightDp(viewportHeightDp = 628f, lyricMode = true), 0.01f)
-        assertEquals(380f, resolvePlayerStageHeightDp(viewportHeightDp = 628f, lyricMode = false), 0.01f)
-        assertEquals(982f, resolvePlayerStageHeightDp(viewportHeightDp = 1280f, lyricMode = true), 0.01f)
+    fun `resolvePlayerStageHeightDp keeps bottom chrome stable across cover and lyric pages`() {
+        assertEquals(370f, resolvePlayerStageHeightDp(viewportHeightDp = 628f, lyricMode = true), 0.01f)
+        assertEquals(370f, resolvePlayerStageHeightDp(viewportHeightDp = 628f, lyricMode = false), 0.01f)
+        assertEquals(1010f, resolvePlayerStageHeightDp(viewportHeightDp = 1280f, lyricMode = true), 0.01f)
         assertEquals(1010f, resolvePlayerStageHeightDp(viewportHeightDp = 1280f, lyricMode = false), 0.01f)
-        assertEquals(1202f, resolvePlayerStageHeightDp(viewportHeightDp = 1500f, lyricMode = true), 0.01f)
+        assertEquals(1230f, resolvePlayerStageHeightDp(viewportHeightDp = 1500f, lyricMode = true), 0.01f)
         assertEquals(1230f, resolvePlayerStageHeightDp(viewportHeightDp = 1500f, lyricMode = false), 0.01f)
+    }
+
+    @Test
+    fun `player controls reserve is mode neutral and overlay slots are fixed`() {
+        assertEquals(236f, resolvePlayerControlsReserveDp(lyricMode = false), 0.01f)
+        assertEquals(236f, resolvePlayerControlsReserveDp(lyricMode = true), 0.01f)
+        assertEquals(36f, resolvePlayerLyricToggleSlotHeightDp(), 0.01f)
+        assertEquals(26f, resolvePlayerStatusSlotHeightDp(), 0.01f)
     }
 
     @Test
@@ -92,9 +100,31 @@ class PlayerScreenSupportTest {
     }
 
     @Test
-    fun `player keeps stage to progress gap compact instead of filling leftover height`() {
-        assertEquals(6f, resolvePlayerStageToProgressGapDp(lyricMode = true), 0.01f)
-        assertEquals(10f, resolvePlayerStageToProgressGapDp(lyricMode = false), 0.01f)
+    fun `player keeps stage to progress gap identical so progress bar does not jump`() {
+        assertEquals(8f, resolvePlayerStageToProgressGapDp(lyricMode = true), 0.01f)
+        assertEquals(8f, resolvePlayerStageToProgressGapDp(lyricMode = false), 0.01f)
+    }
+
+    @Test
+    fun `lyric list is hidden until initial auto center has landed`() {
+        assertFalse(
+            shouldRevealLyricListBeforeFirstCenter(
+                initialAutoCenterSettled = false,
+                mode = LyricScrollMode.AutoFollow,
+            ),
+        )
+        assertTrue(
+            shouldRevealLyricListBeforeFirstCenter(
+                initialAutoCenterSettled = true,
+                mode = LyricScrollMode.AutoFollow,
+            ),
+        )
+        assertTrue(
+            shouldRevealLyricListBeforeFirstCenter(
+                initialAutoCenterSettled = false,
+                mode = LyricScrollMode.ManualPreview,
+            ),
+        )
     }
 
     @Test
