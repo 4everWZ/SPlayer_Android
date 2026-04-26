@@ -59,6 +59,9 @@ interface RecentPlayDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(item: RecentPlayEntity)
 
+    @Query("DELETE FROM recent_play WHERE songId NOT IN (SELECT songId FROM recent_play ORDER BY playedAt DESC LIMIT :limit)")
+    suspend fun pruneOld(limit: Int = 60)
+
     @Query("DELETE FROM recent_play")
     suspend fun clearAll()
 }

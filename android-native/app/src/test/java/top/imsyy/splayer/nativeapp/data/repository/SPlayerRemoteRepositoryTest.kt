@@ -268,6 +268,25 @@ class SPlayerRemoteRepositoryTest {
                       ]
                     }
                     """.trimIndent(),
+                    "netease/user/record" to """
+                    {
+                      "weekData": [
+                        {
+                          "playCount": 28,
+                          "song": {
+                            "id": 3001,
+                            "name": "听歌排行第一",
+                            "dt": 215000,
+                            "artists": [{ "name": "歌手甲" }],
+                            "album": {
+                              "name": "排行专辑",
+                              "picUrl": "https://example.com/rank1.jpg"
+                            }
+                          }
+                        }
+                      ]
+                    }
+                    """.trimIndent(),
                 ),
             ),
         )
@@ -289,9 +308,13 @@ class SPlayerRemoteRepositoryTest {
         assertEquals(3, result.likedSongCount)
         assertEquals("我喜欢的音乐", result.likedPlaylist?.name)
         assertEquals(1, result.recentTracks.size)
+        assertEquals(2, result.recentPlaylists.size)
         assertEquals(1, result.createdPlaylists.size)
         assertEquals(1, result.collectedPlaylists.size)
         assertEquals(1, result.albums.size)
+        assertEquals(1, result.listeningRanks.size)
+        assertEquals("听歌排行第一", result.listeningRanks.first().track.name)
+        assertEquals(28, result.listeningRanks.first().playCount)
         assertEquals("收藏专辑", result.albums.first().name)
     }
 
@@ -675,6 +698,58 @@ class SPlayerRemoteRepositoryTest {
     }
 
     @Test
+    fun `fetchLyrics prefers ttml word lyrics over plain lrc when official yrc is missing`() = runBlocking {
+        val repository = SPlayerRemoteRepository(
+            api = FakeApiService(
+                responses = mapOf(
+                    "netease/lyric/new" to """
+                        {
+                          "code": 200,
+                          "lrc": { "lyric": "[00:00.000]普通歌词" },
+                          "tlyric": { "lyric": "[00:00.000]普通翻译" },
+                          "romalrc": { "lyric": "" },
+                          "yrc": { "lyric": "" },
+                          "ytlrc": { "lyric": "" },
+                          "yromalrc": { "lyric": "" }
+                        }
+                    """.trimIndent(),
+                    "netease/lyric/ttml" to """
+                        <?xml version="1.0" encoding="utf-8"?>
+                        <tt xmlns="http://www.w3.org/ns/ttml" xmlns:ttm="http://www.w3.org/ns/ttml#metadata">
+                          <body>
+                            <div>
+                              <p begin="00:00.000" end="00:03.000">
+                                <span begin="00:00.000" end="00:00.400">逐</span>
+                                <span begin="00:00.400" end="00:00.800">字</span>
+                                <span begin="00:00.800" end="00:01.200">词</span>
+                                <span ttm:role="x-bg">逐字翻译</span>
+                              </p>
+                            </div>
+                          </body>
+                        </tt>
+                    """.trimIndent(),
+                ),
+            ),
+        )
+
+        val lyrics = repository.fetchLyrics(
+            TrackItem(
+                id = 347232L,
+                name = "逐字优先歌曲",
+                artists = "测试歌手",
+                album = "测试专辑",
+                coverUrl = "",
+                durationMs = 180000L,
+            ),
+        )
+
+        assertEquals(1, lyrics.size)
+        assertEquals("逐字词", lyrics.first().mainText)
+        assertEquals("逐字翻译", lyrics.first().translation)
+        assertEquals(3, lyrics.first().words.size)
+    }
+
+    @Test
     fun `fetchLyrics parses netease yrc markers into readable lines`() = runBlocking {
         val repository = SPlayerRemoteRepository(
             api = FakeApiService(
@@ -716,6 +791,55 @@ class SPlayerRemoteRepositoryTest {
         assertEquals("30年に一度の星座が近づいてる", lyrics.first().mainText)
         assertEquals("30年一遇的星座正在靠近", lyrics.first().translation)
         assertEquals("san juu nen ni ichido no seiza ga chikadzu iteru", lyrics.first().romanized)
+        assertTrue(lyrics.first().words.isNotEmpty())
+        assertEquals(28_590L, lyrics.first().words.first().startTimeMs)
+        assertEquals(28_620L, lyrics.first().words[1].startTimeMs)
+    }
+
+    @Test
+    fun `fetchLyrics prefers qq word lyrics over plain lrc when ttml is unavailable`() = runBlocking {
+        val repository = SPlayerRemoteRepository(
+            api = FakeApiService(
+                responses = mapOf(
+                    "netease/lyric/new" to """
+                        {
+                          "code": 200,
+                          "lrc": { "lyric": "[00:00.000]普通歌词" },
+                          "tlyric": { "lyric": "[00:00.000]普通翻译" },
+                          "romalrc": { "lyric": "" },
+                          "yrc": { "lyric": "" },
+                          "ytlrc": { "lyric": "" },
+                          "yromalrc": { "lyric": "" }
+                        }
+                    """.trimIndent(),
+                    "netease/lyric/ttml" to "<tt></tt>",
+                    "qqmusic/match" to """
+                        {
+                          "code": 200,
+                          "song": { "duration": 180000 },
+                          "qrc": "<QrcInfos><Lyric_1 LyricType=\"1\" LyricContent=\"[0,3000]Q(0,500)Q(500,500)逐(1000,500)字(1500,500)\" /></QrcInfos>",
+                          "trans": "[00:00.000]QQ翻译"
+                        }
+                    """.trimIndent(),
+                ),
+            ),
+        )
+
+        val lyrics = repository.fetchLyrics(
+            TrackItem(
+                id = 347233L,
+                name = "QQ逐字歌曲",
+                artists = "测试歌手",
+                album = "测试专辑",
+                coverUrl = "",
+                durationMs = 180000L,
+            ),
+        )
+
+        assertEquals(1, lyrics.size)
+        assertEquals("QQ逐字", lyrics.first().mainText)
+        assertEquals("QQ翻译", lyrics.first().translation)
+        assertEquals(4, lyrics.first().words.size)
     }
 
     @Test
@@ -1007,6 +1131,12 @@ class SPlayerRemoteRepositoryTest {
                       "yrc": { "lyric": "" }
                     }
                 """.trimIndent(),
+                "netease/lyric/ttml" to "<tt></tt>",
+                "qqmusic/match" to """
+                    {
+                      "code": 404
+                    }
+                """.trimIndent(),
             ),
         )
         val repository = SPlayerRemoteRepository(api = api)
@@ -1024,7 +1154,7 @@ class SPlayerRemoteRepositoryTest {
 
         assertEquals(2, first.size)
         assertEquals(first, second)
-        assertEquals(1, api.calls.size)
+        assertEquals(listOf("netease/lyric/new", "netease/lyric/ttml", "qqmusic/match"), api.calls.map { it.url })
     }
 
     @Test
@@ -1040,6 +1170,12 @@ class SPlayerRemoteRepositoryTest {
                       "tlyric": { "lyric": "" },
                       "romalrc": { "lyric": "" },
                       "yrc": { "lyric": "" }
+                    }
+                """.trimIndent(),
+                "netease/lyric/ttml" to "<tt></tt>",
+                "qqmusic/match" to """
+                    {
+                      "code": 404
                     }
                 """.trimIndent(),
             ),
@@ -1064,7 +1200,7 @@ class SPlayerRemoteRepositoryTest {
 
         assertEquals(2, results.size)
         assertEquals(results.first(), results.last())
-        assertEquals(1, api.calls.size)
+        assertEquals(listOf("netease/lyric/new", "netease/lyric/ttml", "qqmusic/match"), api.calls.map { it.url })
     }
 
     @Test

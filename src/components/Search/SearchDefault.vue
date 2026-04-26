@@ -145,8 +145,8 @@ onMounted(() => {
   }
   :deep(.scrollbar) {
     max-height: calc(
-      var(--visual-viewport-height) - 160px - var(--safe-area-inset-top) -
-        var(--safe-area-inset-bottom)
+      var(--visual-viewport-height) -
+        160px - var(--safe-area-inset-top) - var(--safe-area-inset-bottom)
     );
     .n-scrollbar-content {
       padding: 10px;
@@ -156,8 +156,8 @@ onMounted(() => {
     width: 100%;
     max-width: calc(100vw - 24px);
     max-height: calc(
-      var(--visual-viewport-height) - 112px - var(--safe-area-inset-top) -
-        var(--safe-area-inset-bottom)
+      var(--visual-viewport-height) -
+        112px - var(--safe-area-inset-top) - var(--safe-area-inset-bottom)
     );
     background: rgba(240, 240, 240, 0.96);
     border: 1px solid rgba(0, 0, 0, 0.06);

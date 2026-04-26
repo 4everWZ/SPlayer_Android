@@ -1,10 +1,6 @@
 <template>
   <div
-    :class="[
-      'background',
-      settingStore.playerBackgroundType,
-      { 'low-power-mobile': isCapacitor },
-    ]"
+    :class="['background', settingStore.playerBackgroundType, { 'low-power-mobile': isCapacitor }]"
   >
     <Transition name="fade" mode="out-in">
       <!-- 背景色 -->

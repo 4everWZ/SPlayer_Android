@@ -28,7 +28,7 @@ android {
         minSdk = 28
         targetSdk = 36
         versionCode = 1
-        versionName = "2.0.0-native-dev"
+        versionName = "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -42,7 +42,6 @@ android {
     buildTypes {
         debug {
             applicationIdSuffix = ".native"
-            versionNameSuffix = "-debug"
             manifestPlaceholders["appLabel"] = "SPlayer Native"
         }
         release {

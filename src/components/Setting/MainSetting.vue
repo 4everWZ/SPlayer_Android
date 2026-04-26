@@ -195,9 +195,13 @@ const showLeftMenu = computed({
 });
 
 // 监听屏幕大小变化，非小屏时自动显示侧边栏
-watch(isSmallScreen, (small) => {
-  showLeftMenu.value = !small;
-}, { immediate: true });
+watch(
+  isSmallScreen,
+  (small) => {
+    showLeftMenu.value = !small;
+  },
+  { immediate: true },
+);
 
 // 菜单数据
 const activeKey = ref<SettingType>(props.type);

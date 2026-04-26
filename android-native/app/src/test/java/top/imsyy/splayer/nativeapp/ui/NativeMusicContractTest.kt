@@ -5,6 +5,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import top.imsyy.splayer.nativeapp.model.AlbumItem
 import top.imsyy.splayer.nativeapp.model.DiscoveryHomeUi
+import top.imsyy.splayer.nativeapp.model.ListeningRankItem
 import top.imsyy.splayer.nativeapp.model.MyMusicHomeUi
 import top.imsyy.splayer.nativeapp.model.MyMusicPanelTab
 import top.imsyy.splayer.nativeapp.model.PlaylistItem
@@ -60,7 +61,7 @@ class NativeMusicContractTest {
     }
 
     @Test
-    fun `buildMyMusicPanel keeps liked created collected and album assets`() {
+    fun `buildMyMusicPanel keeps recent tab focused on albums playlists and listening rank`() {
         val user = UserAccountUi(
             userId = 7L,
             nickname = "测试用户",
@@ -72,6 +73,7 @@ class NativeMusicContractTest {
                 likedSongCount = 77,
                 likedPlaylist = samplePlaylist(id = 700, name = "我喜欢的音乐", creatorUserId = 7L),
                 recentTracks = listOf(sampleTrack(id = 801, name = "最近播放")),
+                recentPlaylists = listOf(samplePlaylist(id = 703, name = "最近歌单", creatorUserId = 7L)),
                 createdPlaylists = listOf(samplePlaylist(id = 701, name = "创建歌单", creatorUserId = 7L)),
                 collectedPlaylists = listOf(samplePlaylist(id = 702, name = "收藏歌单", creatorUserId = 8L)),
                 albums = listOf(
@@ -83,13 +85,24 @@ class NativeMusicContractTest {
                         trackCount = 10,
                     ),
                 ),
+                listeningRanks = listOf(
+                    ListeningRankItem(
+                        track = sampleTrack(id = 1001, name = "听歌排行第一"),
+                        playCount = 28,
+                    ),
+                ),
             ),
         )
 
         assertEquals("测试用户", panel.header.nickname)
         assertEquals(77, panel.likedSongCount)
         assertEquals("我喜欢的音乐", panel.likedPlaylist?.name)
-        assertEquals(1, panel.tabItems(MyMusicPanelTab.Recent).size)
+        assertEquals(1, panel.recentPlaylists.size)
+        assertEquals("最近歌单", panel.recentPlaylists.first().name)
+        assertEquals(1, panel.listeningRanks.size)
+        assertEquals("听歌排行第一", panel.listeningRanks.first().track.name)
+        assertEquals(1, panel.tabItems(MyMusicPanelTab.Recent).filterIsInstance<PlaylistItem>().size)
+        assertEquals(1, panel.tabItems(MyMusicPanelTab.Recent).filterIsInstance<ListeningRankItem>().size)
         assertEquals(1, panel.tabItems(MyMusicPanelTab.Created).size)
         assertEquals(1, panel.tabItems(MyMusicPanelTab.Collected).size)
         assertEquals(1, panel.tabItems(MyMusicPanelTab.Album).size)

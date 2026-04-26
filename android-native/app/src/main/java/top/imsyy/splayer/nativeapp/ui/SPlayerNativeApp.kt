@@ -20,6 +20,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -31,8 +32,11 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import top.imsyy.splayer.nativeapp.model.MyMusicPanelTab
 import top.imsyy.splayer.nativeapp.model.ThemeMode
+import top.imsyy.splayer.nativeapp.player.toMiniPlayerChromeState
 import top.imsyy.splayer.nativeapp.ui.components.MiniPlayerBar
 import top.imsyy.splayer.nativeapp.ui.navigation.DrawerEntry
 import top.imsyy.splayer.nativeapp.ui.navigation.Routes
@@ -52,7 +56,14 @@ fun SPlayerNativeApp() {
     val navController = rememberNavController()
     val playerViewModel: PlayerViewModel = hiltViewModel()
     val chromeViewModel: AppChromeViewModel = hiltViewModel()
-    val playbackState by playerViewModel.playbackState.collectAsStateWithLifecycle()
+    val miniPlayerStateFlow = remember(playerViewModel) {
+        playerViewModel.playbackState
+            .map(::toMiniPlayerChromeState)
+            .distinctUntilChanged()
+    }
+    val miniPlayerState by miniPlayerStateFlow.collectAsStateWithLifecycle(
+        initialValue = toMiniPlayerChromeState(playerViewModel.playbackState.value),
+    )
     val chromeState by chromeViewModel.uiState.collectAsStateWithLifecycle()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
@@ -113,11 +124,11 @@ fun SPlayerNativeApp() {
                 bottomBar = {
                     if (navBackStackEntry?.destination?.route != Routes.Player) {
                         Column(modifier = Modifier.navigationBarsPadding()) {
-                            playbackState.currentTrack?.let { track ->
+                            miniPlayerState.currentTrack?.let { track ->
                                 MiniPlayerBar(
                                     track = track,
-                                    isPlaying = playbackState.isPlaying,
-                                    queueCount = if (chromeState.showQueueCount) playbackState.queue.size else 0,
+                                    isPlaying = miniPlayerState.isPlaying,
+                                    queueCount = if (chromeState.showQueueCount) miniPlayerState.queueCount else 0,
                                     onOpenPlayer = { navController.navigate(Routes.Player) },
                                     onTogglePlay = playerViewModel::togglePlayback,
                                     onOpenQueue = {

@@ -26,6 +26,11 @@ data class AlbumItem(
     val trackCount: Int = 0,
 )
 
+data class ListeningRankItem(
+    val track: TrackItem,
+    val playCount: Int,
+)
+
 data class ArtistItem(
     val id: Long,
     val name: String,
@@ -75,9 +80,11 @@ data class MyMusicHomeUi(
     val likedSongCount: Int = 0,
     val likedPlaylist: PlaylistItem? = null,
     val recentTracks: List<TrackItem> = emptyList(),
+    val recentPlaylists: List<PlaylistItem> = emptyList(),
     val createdPlaylists: List<PlaylistItem> = emptyList(),
     val collectedPlaylists: List<PlaylistItem> = emptyList(),
     val albums: List<AlbumItem> = emptyList(),
+    val listeningRanks: List<ListeningRankItem> = emptyList(),
 )
 
 data class PlaylistDetailUi(
@@ -128,10 +135,12 @@ data class LyricWordUi(
 
 data class LyricLineUi(
     val startTimeMs: Long,
+    val endTimeMs: Long = startTimeMs,
     val mainText: String,
     val translation: String = "",
     val romanized: String = "",
     val words: List<LyricWordUi> = emptyList(),
+    val hasWordTiming: Boolean = false,
 )
 
 data class UserAccountUi(
@@ -202,13 +211,19 @@ data class MyMusicPanelUi(
     val likedSongCount: Int = 0,
     val likedPlaylist: PlaylistItem? = null,
     val recentTracks: List<TrackItem> = emptyList(),
+    val recentPlaylists: List<PlaylistItem> = emptyList(),
     val createdPlaylists: List<PlaylistItem> = emptyList(),
     val collectedPlaylists: List<PlaylistItem> = emptyList(),
     val albums: List<AlbumItem> = emptyList(),
+    val listeningRanks: List<ListeningRankItem> = emptyList(),
 ) {
     fun tabItems(tab: MyMusicPanelTab): List<Any> {
         return when (tab) {
-            MyMusicPanelTab.Recent -> recentTracks
+            MyMusicPanelTab.Recent -> buildList {
+                addAll(albums)
+                addAll(recentPlaylists)
+                addAll(listeningRanks)
+            }
             MyMusicPanelTab.Created -> createdPlaylists
             MyMusicPanelTab.Collected -> collectedPlaylists
             MyMusicPanelTab.Album -> albums

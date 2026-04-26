@@ -73,6 +73,7 @@ class QueueRepository @Inject constructor(
                 playedAt = System.currentTimeMillis(),
             ),
         )
+        recentPlayDao.pruneOld()
     }
 
     suspend fun clearQueue() {

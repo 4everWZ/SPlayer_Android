@@ -1,5 +1,6 @@
 package top.imsyy.splayer.nativeapp.data.repository
 
+import java.util.LinkedHashMap
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -28,6 +29,7 @@ import top.imsyy.splayer.nativeapp.model.LyricLineUi
 import top.imsyy.splayer.nativeapp.model.LyricWordUi
 import top.imsyy.splayer.nativeapp.model.AlbumDetailUi
 import top.imsyy.splayer.nativeapp.model.AlbumItem
+import top.imsyy.splayer.nativeapp.model.ListeningRankItem
 import top.imsyy.splayer.nativeapp.model.PlaylistDetailUi
 import top.imsyy.splayer.nativeapp.model.PlaylistItem
 import top.imsyy.splayer.nativeapp.model.PodcastHomeUi
@@ -45,6 +47,27 @@ data class QrCheckState(
     val cookieHeader: String = "",
 )
 
+internal class BoundedMemoryCache<K, V>(
+    private val maxEntries: Int,
+) {
+    private val entries = object : LinkedHashMap<K, V>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<K, V>?): Boolean {
+            return size > maxEntries
+        }
+    }
+
+    @Synchronized
+    operator fun get(key: K): V? = entries[key]
+
+    @Synchronized
+    operator fun set(key: K, value: V) {
+        entries[key] = value
+    }
+
+    @Synchronized
+    fun size(): Int = entries.size
+}
+
 @Singleton
 class SPlayerRemoteRepository @Inject constructor(
     private val api: SPlayerApiService,
@@ -53,15 +76,20 @@ class SPlayerRemoteRepository @Inject constructor(
         const val PLAYLIST_PREVIEW_SIZE = 20
         const val PLAYLIST_INITIAL_PAGE_SIZE = 80
         const val PLAYLIST_PAGE_SIZE = 200
+        const val DETAIL_CACHE_LIMIT = 40
+        const val PLAYLIST_PAGE_CACHE_LIMIT = 120
+        const val LYRIC_CACHE_LIMIT = 128
+        const val HOT_COMMENT_CACHE_LIMIT = 96
+        const val LATEST_COMMENT_CACHE_LIMIT = 160
     }
 
     private val officialLevels = listOf("exhigh", "higher", "standard")
-    private val playlistDetailCache = ConcurrentHashMap<Long, PlaylistDetailUi>()
-    private val playlistPageCache = ConcurrentHashMap<String, List<TrackItem>>()
-    private val lyricCache = ConcurrentHashMap<Long, List<LyricLineUi>>()
-    private val hotCommentCache = ConcurrentHashMap<Long, CommentPageResult>()
-    private val latestCommentCache = ConcurrentHashMap<String, CommentPageResult>()
-    private val albumDetailCache = ConcurrentHashMap<Long, AlbumDetailUi>()
+    private val playlistDetailCache = BoundedMemoryCache<Long, PlaylistDetailUi>(DETAIL_CACHE_LIMIT)
+    private val playlistPageCache = BoundedMemoryCache<String, List<TrackItem>>(PLAYLIST_PAGE_CACHE_LIMIT)
+    private val lyricCache = BoundedMemoryCache<Long, List<LyricLineUi>>(LYRIC_CACHE_LIMIT)
+    private val hotCommentCache = BoundedMemoryCache<Long, CommentPageResult>(HOT_COMMENT_CACHE_LIMIT)
+    private val latestCommentCache = BoundedMemoryCache<String, CommentPageResult>(LATEST_COMMENT_CACHE_LIMIT)
+    private val albumDetailCache = BoundedMemoryCache<Long, AlbumDetailUi>(DETAIL_CACHE_LIMIT)
     private val inFlightRequests = ConcurrentHashMap<String, CompletableDeferred<Any?>>()
     private val inFlightLock = Any()
     @Volatile
@@ -86,8 +114,8 @@ class SPlayerRemoteRepository @Inject constructor(
 
     fun peekCachedHotComments(songId: Long): CommentPageResult? = hotCommentCache[songId]
 
-    fun peekCachedLatestComments(songId: Long, pageNo: Int = 1): CommentPageResult? {
-        return latestCommentCache[latestCommentCacheKey(songId, pageNo)]
+    fun peekCachedLatestComments(songId: Long, pageNo: Int = 1, cursor: Long? = null): CommentPageResult? {
+        return latestCommentCache[latestCommentCacheKey(songId, pageNo, cursor)]
     }
 
     suspend fun fetchPlaylistPreviewDetail(
@@ -269,6 +297,18 @@ class SPlayerRemoteRepository @Inject constructor(
                     mapOf("limit" to "20", "offset" to "0", "timestamp" to now()),
                 )
             }
+            val recordResponse = async {
+                runCatching {
+                    getNetease(
+                        "user/record",
+                        mapOf(
+                            "uid" to currentUser.userId.toString(),
+                            "type" to "1",
+                            "timestamp" to now(),
+                        ),
+                    )
+                }.getOrNull()
+            }
             val profilePayload = profile.await()
             val profileUser = profilePayload.obj("profile").toUserAccount().let { user ->
                 if (user == null) {
@@ -285,14 +325,21 @@ class SPlayerRemoteRepository @Inject constructor(
             val playlists = playlistResponse.await().array("playlist").mapNotNull { it.toPlaylistItem() }
             val createdPlaylists = playlists.filter { it.creatorUserId == profileUser.userId }
             val collectedPlaylists = playlists.filter { it.creatorUserId != profileUser.userId }
+            val likedPlaylist = playlists.resolveLikedPlaylist(profileUser.userId)
             MyMusicHomeUi(
                 currentUser = profileUser,
                 likedSongCount = likeResponse.await().array("ids").size,
-                likedPlaylist = playlists.resolveLikedPlaylist(profileUser.userId),
+                likedPlaylist = likedPlaylist,
                 recentTracks = recentTracks,
+                recentPlaylists = buildRecentPlaylists(
+                    likedPlaylist = likedPlaylist,
+                    createdPlaylists = createdPlaylists,
+                    collectedPlaylists = collectedPlaylists,
+                ),
                 createdPlaylists = createdPlaylists.take(12),
                 collectedPlaylists = collectedPlaylists.take(12),
                 albums = albumResponse.await().array("data").mapNotNull { it.toAlbumItem() }.take(12),
+                listeningRanks = recordResponse.await().toListeningRanks(),
             )
         }
     }
@@ -306,22 +353,31 @@ class SPlayerRemoteRepository @Inject constructor(
                 ?.takeIf { cached -> cached.trackCount == 0 || cached.tracks.size >= min(cached.trackCount, PLAYLIST_PAGE_SIZE) }
                 ?.let { return it }
         }
-        val preview = fetchPlaylistPreviewDetail(
-            playlistId = playlistId,
-            forceRefresh = forceRefresh,
-        )
-        if (preview.trackCount <= 0) {
-            return preview
-        }
-        val firstPage = fetchPlaylistTracksPage(
-            playlistId = playlistId,
-            offset = 0,
-            limit = PLAYLIST_PAGE_SIZE,
-            forceRefresh = forceRefresh,
-        )
-        return preview.copy(
-            tracks = mergeTrackItems(preview.tracks, firstPage),
-        ).also { detail ->
+        return supervisorScope {
+            val previewDeferred = async {
+                fetchPlaylistPreviewDetail(
+                    playlistId = playlistId,
+                    forceRefresh = forceRefresh,
+                )
+            }
+            val firstPageDeferred = async {
+                fetchPlaylistTracksPage(
+                    playlistId = playlistId,
+                    offset = 0,
+                    limit = PLAYLIST_PAGE_SIZE,
+                    forceRefresh = forceRefresh,
+                )
+            }
+
+            val preview = previewDeferred.await()
+            if (preview.trackCount <= 0) {
+                preview
+            } else {
+                preview.copy(
+                    tracks = mergeTrackItems(preview.tracks, firstPageDeferred.await()),
+                )
+            }
+        }.also { detail ->
             playlistDetailCache[playlistId] = detail
         }
     }
@@ -473,22 +529,23 @@ class SPlayerRemoteRepository @Inject constructor(
             val lrc = response.obj("lrc").string("lyric")
             val tlyric = response.obj("tlyric").string("lyric")
             val romalrc = response.obj("romalrc").string("lyric")
-            parseNeteaseYrc(yrc, ytlrc, yromalrc)
-                .takeIf { it.isNotEmpty() }
-                ?.let { parsed ->
-                    return@awaitInFlight sanitizeLyricLines(parsed).also { lyricCache[track.id] = it }
-                }
-            parseLyric(lrc, tlyric, romalrc)
-                .takeIf { it.isNotEmpty() }
-                ?.let { parsed ->
-                    return@awaitInFlight sanitizeLyricLines(parsed).also { lyricCache[track.id] = it }
-                }
-            parseTtmlLyric(track.id)
-                .takeIf { it.isNotEmpty() }
-                ?.let { parsed ->
-                    return@awaitInFlight sanitizeLyricLines(parsed).also { lyricCache[track.id] = it }
-                }
-            sanitizeLyricLines(parseQQMusicLyric(track)).also { lyricCache[track.id] = it }
+            val officialWordLyrics = parseNeteaseYrc(yrc, ytlrc, yromalrc)
+            if (officialWordLyrics.isNotEmpty()) {
+                return@awaitInFlight sanitizeLyricLines(officialWordLyrics).also { lyricCache[track.id] = it }
+            }
+
+            val plainLyrics = parseLyric(lrc, tlyric, romalrc)
+            val ttmlLyrics = parseTtmlLyric(track.id)
+            if (ttmlLyrics.isNotEmpty()) {
+                return@awaitInFlight sanitizeLyricLines(ttmlLyrics).also { lyricCache[track.id] = it }
+            }
+
+            val qqLyrics = parseQQMusicLyric(track)
+            if (qqLyrics.isNotEmpty()) {
+                return@awaitInFlight sanitizeLyricLines(qqLyrics).also { lyricCache[track.id] = it }
+            }
+
+            sanitizeLyricLines(plainLyrics).also { lyricCache[track.id] = it }
         }
     }
 
@@ -524,23 +581,29 @@ class SPlayerRemoteRepository @Inject constructor(
     suspend fun fetchLatestComments(
         songId: Long,
         pageNo: Int = 1,
+        cursor: Long? = null,
         forceRefresh: Boolean = false,
     ): CommentPageResult {
-        val cacheKey = latestCommentCacheKey(songId, pageNo)
+        val cacheKey = latestCommentCacheKey(songId, pageNo, cursor)
         if (!forceRefresh) {
             latestCommentCache[cacheKey]?.let { return it }
         }
         return awaitInFlight("comments-latest:$cacheKey") {
+            val params = linkedMapOf(
+                "id" to songId.toString(),
+                "type" to "0",
+                "pageNo" to pageNo.toString(),
+                "pageSize" to "20",
+                "sortType" to "3",
+                "timestamp" to now(),
+            ).apply {
+                if (pageNo > 1 && cursor != null && cursor > 0L) {
+                    put("cursor", cursor.toString())
+                }
+            }
             getNetease(
                 "comment/new",
-                mapOf(
-                    "id" to songId.toString(),
-                    "type" to "0",
-                    "pageNo" to pageNo.toString(),
-                    "pageSize" to "20",
-                    "sortType" to "3",
-                    "timestamp" to now(),
-                ),
+                params,
             ).obj("data").let { data ->
                 CommentPageResult(
                     comments = data.array("comments").map { it.toComment() },
@@ -673,7 +736,13 @@ class SPlayerRemoteRepository @Inject constructor(
         limit: Int,
     ): String = "$playlistId:$offset:$limit"
 
-    private fun latestCommentCacheKey(songId: Long, pageNo: Int): String = "$songId:$pageNo"
+    private fun latestCommentCacheKey(songId: Long, pageNo: Int, cursor: Long? = null): String {
+        return if (cursor == null || cursor <= 0L) {
+            "$songId:$pageNo"
+        } else {
+            "$songId:$pageNo:$cursor"
+        }
+    }
 
     private suspend fun <T> awaitInFlight(key: String, block: suspend () -> T): T {
         val waiter = synchronized(inFlightLock) {
@@ -856,7 +925,7 @@ private val ttmlRomanizedPattern = Regex("""<span\b[^>]*ttm:role="x-roman"[^>]*>
 private val ttmlAnyAttributePattern = Regex("""([A-Za-z:]+)="([^"]*)"""")
 
 internal fun parsePlainLrcLines(content: String): List<LyricLineUi> {
-    return content.lineSequence()
+    val rawLines = content.lineSequence()
         .mapNotNull { raw ->
             val line = raw.trim()
             val match = plainLrcPattern.find(line) ?: return@mapNotNull null
@@ -872,6 +941,23 @@ internal fun parsePlainLrcLines(content: String): List<LyricLineUi> {
         }
         .sortedBy { it.startTimeMs }
         .toList()
+
+    if (rawLines.isEmpty()) return emptyList()
+
+    return rawLines.mapIndexed { index, line ->
+        val nextStart = rawLines.getOrNull(index + 1)?.startTimeMs ?: (line.startTimeMs + 10_000L)
+        line.copy(
+            endTimeMs = nextStart.coerceAtLeast(line.startTimeMs),
+            words = listOf(
+                LyricWordUi(
+                    text = line.mainText,
+                    startTimeMs = line.startTimeMs,
+                    endTimeMs = nextStart.coerceAtLeast(line.startTimeMs),
+                ),
+            ),
+            hasWordTiming = false,
+        )
+    }
 }
 
 internal fun parseNeteaseYrcLines(
@@ -888,17 +974,18 @@ internal fun parseNeteaseYrcLines(
             if (line.isBlank() || line.startsWith("{")) return@mapNotNull null
             val match = yrcLinePattern.find(line) ?: return@mapNotNull null
             val startTimeMs = match.groupValues[1].toLongOrNull() ?: return@mapNotNull null
+            val lineDurationMs = match.groupValues[2].toLongOrNull() ?: 0L
             val content = match.groupValues[3]
             val words = yrcWordPattern.findAll(content)
                 .mapNotNull { wordMatch ->
-                    val offsetMs = wordMatch.groupValues[1].toLongOrNull() ?: return@mapNotNull null
+                    val wordStartMs = wordMatch.groupValues[1].toLongOrNull() ?: return@mapNotNull null
                     val durationMs = wordMatch.groupValues[2].toLongOrNull() ?: return@mapNotNull null
                     val text = wordMatch.groupValues[4]
                     if (text.isBlank()) return@mapNotNull null
                     LyricWordUi(
                         text = text,
-                        startTimeMs = startTimeMs + offsetMs,
-                        endTimeMs = startTimeMs + offsetMs + durationMs,
+                        startTimeMs = wordStartMs,
+                        endTimeMs = wordStartMs + durationMs,
                     )
                 }
                 .toList()
@@ -908,12 +995,15 @@ internal fun parseNeteaseYrcLines(
                     content.replace(Regex("""\(\d+,\d+,\d+\)"""), "").trim()
                 }
             if (parsedText.isBlank()) return@mapNotNull null
+            val lastWordEndTimeMs = words.maxOfOrNull { word -> word.endTimeMs } ?: startTimeMs
             LyricLineUi(
                 startTimeMs = startTimeMs,
+                endTimeMs = maxOf(startTimeMs + lineDurationMs, lastWordEndTimeMs, startTimeMs),
                 mainText = parsedText,
                 translation = translations[startTimeMs]?.mainText.orEmpty(),
                 romanized = romanized[startTimeMs]?.mainText.orEmpty(),
                 words = words,
+                hasWordTiming = true,
             )
         }
         .sortedBy { it.startTimeMs }
@@ -934,6 +1024,7 @@ internal fun parseTimedLyricLines(
             if (line.isBlank()) return@mapNotNull null
             val match = timedLyricLinePattern.find(line) ?: return@mapNotNull null
             val startTimeMs = match.groupValues[1].toLongOrNull() ?: return@mapNotNull null
+            val lineDurationMs = match.groupValues[2].toLongOrNull() ?: 0L
             val content = match.groupValues[3]
             val words = timedLyricWordPattern.findAll(content)
                 .mapNotNull { wordMatch ->
@@ -952,12 +1043,15 @@ internal fun parseTimedLyricLines(
                 .trim()
                 .ifBlank { content.trim() }
             if (text.isBlank()) return@mapNotNull null
+            val lastWordEndTimeMs = words.maxOfOrNull { word -> word.endTimeMs } ?: startTimeMs
             LyricLineUi(
                 startTimeMs = startTimeMs,
+                endTimeMs = maxOf(startTimeMs + lineDurationMs, lastWordEndTimeMs, startTimeMs),
                 mainText = text,
                 translation = translations[startTimeMs]?.mainText.orEmpty(),
                 romanized = romanized[startTimeMs]?.mainText.orEmpty(),
                 words = words,
+                hasWordTiming = true,
             )
         }
         .sortedBy { it.startTimeMs }
@@ -994,12 +1088,16 @@ internal fun parseTtmlLyricBody(body: String): List<LyricLineUi> {
         val startTimeMs = parseTtmlTimeValue(attrs["begin"])
             ?: words.firstOrNull()?.startTimeMs
             ?: return@mapNotNull null
+        val explicitEndTimeMs = parseTtmlTimeValue(attrs["end"])
+        val lastWordEndTimeMs = words.maxOfOrNull { word -> word.endTimeMs }
         LyricLineUi(
             startTimeMs = startTimeMs,
+            endTimeMs = maxOf(explicitEndTimeMs ?: startTimeMs, lastWordEndTimeMs ?: startTimeMs, startTimeMs),
             mainText = mainText,
             translation = ttmlTranslationPattern.find(content)?.groupValues?.getOrNull(1)?.let(::stripXmlText).orEmpty(),
             romanized = ttmlRomanizedPattern.find(content)?.groupValues?.getOrNull(1)?.let(::stripXmlText).orEmpty(),
             words = words,
+            hasWordTiming = true,
         )
     }.sortedBy { it.startTimeMs }.toList()
 }
@@ -1143,8 +1241,12 @@ internal fun stripLeadingAndTrailingLyricMetadata(
         endIndex -= 1
     }
 
-    return cleanedLines
-        .subList(startIndex, endIndex)
+    val croppedLines = cleanedLines.subList(startIndex, endIndex)
+    val filteredLines = croppedLines.filterNot { line ->
+        looksLikeLyricMetadataLine(line.mainText)
+    }
+    val effectiveLines = filteredLines.ifEmpty { croppedLines }
+    return effectiveLines
         .distinctBy { line ->
             Triple(line.startTimeMs, line.mainText, "${line.translation}|${line.romanized}")
         }
@@ -1176,6 +1278,48 @@ private fun List<PlaylistItem>.resolveLikedPlaylist(currentUserId: Long): Playli
     } ?: firstOrNull { playlist ->
         playlist.creatorUserId == currentUserId
     } ?: firstOrNull()
+}
+
+private fun buildRecentPlaylists(
+    likedPlaylist: PlaylistItem?,
+    createdPlaylists: List<PlaylistItem>,
+    collectedPlaylists: List<PlaylistItem>,
+): List<PlaylistItem> {
+    return buildList {
+        likedPlaylist?.let(::add)
+        addAll(createdPlaylists)
+        addAll(collectedPlaylists)
+    }.distinctBy { playlist -> playlist.id }.take(8)
+}
+
+private fun JsonObject?.toListeningRanks(): List<ListeningRankItem> {
+    val payload = this ?: return emptyList()
+    val candidates = payload.array("weekData").ifEmpty { payload.array("allData") }
+    return candidates.mapNotNull { entry ->
+        val item = entry.obj
+        val song = item.obj("song")
+        val trackId = song.long("id")
+        val trackName = song.string("name")
+        if (trackId <= 0L || trackName.isBlank()) return@mapNotNull null
+        val album = song.obj("al").takeIf { it.isNotEmpty() }
+            ?: song.obj("album").takeIf { it.isNotEmpty() }
+            ?: JsonObject(emptyMap())
+        val artists = song.array("ar").joinToString(" / ") { artist -> artist.obj.string("name") }
+            .ifBlank { song.array("artists").joinToString(" / ") { artist -> artist.obj.string("name") } }
+        val track = TrackItem(
+            id = trackId,
+            name = trackName,
+            artists = artists,
+            album = album.string("name"),
+            coverUrl = album.string("picUrl"),
+            durationMs = song.long("dt").takeIf { it > 0L } ?: song.long("duration"),
+            keyword = listOf(trackName, artists).filter { it.isNotBlank() }.joinToString(" "),
+        )
+        ListeningRankItem(
+            track = track,
+            playCount = item.int("playCount").coerceAtLeast(0),
+        )
+    }.distinctBy { rank -> rank.track.id }.take(10)
 }
 
 private fun JsonElement.toAlbumItem(): AlbumItem? {

@@ -1,5 +1,8 @@
 package top.imsyy.splayer.nativeapp.ui
 
+import top.imsyy.splayer.nativeapp.model.CommentItem
+import top.imsyy.splayer.nativeapp.model.CommentPageResult
+import top.imsyy.splayer.nativeapp.model.TrackItem
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -22,5 +25,79 @@ class ViewModelSupportTest {
         )
 
         assertEquals("歌单参数无效", message)
+    }
+
+    @Test
+    fun `resolveCommentPreviewCount keeps cached comment count visible before sheet opens`() {
+        val hot = CommentPageResult(
+            comments = listOf(sampleComment(id = 1L)),
+            totalCount = 532,
+        )
+        val latest = CommentPageResult(
+            comments = listOf(sampleComment(id = 2L), sampleComment(id = 3L)),
+            totalCount = 1280,
+        )
+
+        assertEquals(1280, resolveCommentPreviewCount(existingCount = 0, hotComments = hot, latestComments = latest))
+        assertEquals(532, resolveCommentPreviewCount(existingCount = 12, hotComments = hot, latestComments = null))
+        assertEquals(12, resolveCommentPreviewCount(existingCount = 12, hotComments = null, latestComments = null))
+    }
+
+    @Test
+    fun `resolveMergedTrackPage stops pagination when a non empty page adds no new tracks`() {
+        val existing = listOf(sampleTrack(id = 1L), sampleTrack(id = 2L))
+        val incomingDuplicateOnly = listOf(sampleTrack(id = 2L))
+
+        val result = resolveMergedTrackPage(
+            existingTracks = existing,
+            incomingTracks = incomingDuplicateOnly,
+            trackCount = 10,
+        )
+
+        assertEquals(existing, result.tracks)
+        assertEquals(false, result.madeProgress)
+        assertEquals(false, result.hasMore)
+    }
+
+    @Test
+    fun `resolveMergedTrackPage keeps pagination only when new tracks were appended`() {
+        val result = resolveMergedTrackPage(
+            existingTracks = listOf(sampleTrack(id = 1L)),
+            incomingTracks = listOf(sampleTrack(id = 2L), sampleTrack(id = 3L)),
+            trackCount = 5,
+        )
+
+        assertEquals(3, result.tracks.size)
+        assertEquals(true, result.madeProgress)
+        assertEquals(true, result.hasMore)
+    }
+
+    @Test
+    fun `resolveMaxPlaylistPageRequests adds one guard page beyond expected remaining pages`() {
+        assertEquals(0, resolveMaxPlaylistPageRequests(loadedTrackCount = 10, trackCount = 10))
+        assertEquals(2, resolveMaxPlaylistPageRequests(loadedTrackCount = 0, trackCount = 200))
+        assertEquals(3, resolveMaxPlaylistPageRequests(loadedTrackCount = 80, trackCount = 420))
+    }
+
+    private fun sampleComment(id: Long): CommentItem {
+        return CommentItem(
+            id = id,
+            userName = "测试用户",
+            userAvatar = "",
+            content = "评论",
+            likedCount = 0,
+            time = 0L,
+        )
+    }
+
+    private fun sampleTrack(id: Long): TrackItem {
+        return TrackItem(
+            id = id,
+            name = "测试歌曲$id",
+            artists = "测试歌手",
+            album = "测试专辑",
+            coverUrl = "",
+            durationMs = 180_000L,
+        )
     }
 }

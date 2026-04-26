@@ -1,4 +1,5 @@
 *.sh text eol=lf
+android-native/gradlew text eol=lf
 
 auto-eslint.mjs text eol=lf
 native/**/*.d.ts text eol=lf

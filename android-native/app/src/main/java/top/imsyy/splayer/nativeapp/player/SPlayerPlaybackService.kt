@@ -37,6 +37,7 @@ class SPlayerPlaybackService : MediaSessionService() {
         stopForeground(STOP_FOREGROUND_REMOVE)
         mediaSession?.release()
         mediaSession = null
+        playbackCoordinator.detachSessionService()
         super.onDestroy()
     }
 

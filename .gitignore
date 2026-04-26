@@ -63,7 +63,8 @@ native-*.log
 lyrics-ui.xml
 player-ui.xml
 native-ui.xml
-.gradle-user/*
+.gradle-user/
+.gradle-user-home/
 
 # AI
 .trae/*

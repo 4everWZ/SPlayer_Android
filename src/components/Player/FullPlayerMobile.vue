@@ -9,9 +9,7 @@
         <div class="subtitle text-hidden">{{ artistName }}</div>
       </div>
       <div v-if="panelMode === 'lyric'" class="top-actions">
-        <div class="top-action" @click.stop="openInfoPage">
-          返回封面
-        </div>
+        <div class="top-action" @click.stop="openInfoPage">返回封面</div>
       </div>
       <div v-else class="top-bar-placeholder"></div>
     </div>

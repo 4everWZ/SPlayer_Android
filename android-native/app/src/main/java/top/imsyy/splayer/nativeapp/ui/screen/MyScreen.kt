@@ -13,11 +13,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.LibraryMusic
+import androidx.compose.material.icons.rounded.QueryStats
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material3.Card
@@ -41,6 +43,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import top.imsyy.splayer.nativeapp.model.AlbumItem
+import top.imsyy.splayer.nativeapp.model.ListeningRankItem
 import top.imsyy.splayer.nativeapp.model.MyMusicPanelTab
 import top.imsyy.splayer.nativeapp.model.PlaylistItem
 import top.imsyy.splayer.nativeapp.model.TrackItem
@@ -116,14 +119,44 @@ fun MyScreen(
 
         when (state.selectedTab) {
             MyMusicPanelTab.Recent -> {
-                items(state.panel.recentTracks, key = { it.id }) { track ->
-                    AssetRowCard(
-                        title = track.name,
-                        subtitle = listOf(track.artists, track.album).filter { it.isNotBlank() }.joinToString(" · "),
-                        coverUrl = track.coverUrl,
-                        icon = { Icon(Icons.Rounded.Schedule, contentDescription = null) },
-                        onClick = { onPlayTrack(track) },
-                    )
+                if (state.panel.albums.isNotEmpty()) {
+                    item { AssetSectionTitle("专辑") }
+                    items(state.panel.albums, key = { album -> "recent-album-${album.id}" }) { album ->
+                        AlbumAssetCard(
+                            album = album,
+                            onClick = { onOpenAlbum(album.id) },
+                        )
+                    }
+                }
+                if (state.panel.recentPlaylists.isNotEmpty()) {
+                    item { AssetSectionTitle("歌单") }
+                    items(state.panel.recentPlaylists, key = { playlist -> "recent-playlist-${playlist.id}" }) { playlist ->
+                        AssetRowCard(
+                            title = playlist.name,
+                            subtitle = playlist.trackCount.takeIf { it > 0 }?.let { "${it} 首" } ?: "音乐歌单",
+                            coverUrl = playlist.coverUrl,
+                            icon = {
+                                Icon(
+                                    if (playlist.id == state.panel.likedPlaylist?.id) Icons.Rounded.Favorite else Icons.Rounded.LibraryMusic,
+                                    contentDescription = null,
+                                )
+                            },
+                            onClick = { onOpenPlaylist(playlist.id) },
+                        )
+                    }
+                }
+                if (state.panel.listeningRanks.isNotEmpty()) {
+                    item { AssetSectionTitle("听歌排行") }
+                    itemsIndexed(
+                        state.panel.listeningRanks,
+                        key = { _, rank -> "listening-rank-${rank.track.id}" },
+                    ) { index, rank ->
+                        ListeningRankCard(
+                            rank = rank,
+                            position = index + 1,
+                            onClick = { onPlayTrack(rank.track) },
+                        )
+                    }
                 }
             }
 
@@ -161,6 +194,16 @@ fun MyScreen(
             }
         }
     }
+}
+
+@Composable
+private fun AssetSectionTitle(title: String) {
+    Text(
+        text = title,
+        modifier = Modifier.padding(top = 4.dp, bottom = 2.dp),
+        style = MaterialTheme.typography.titleMedium,
+        fontWeight = FontWeight.Bold,
+    )
 }
 
 @Composable
@@ -373,6 +416,21 @@ private fun AlbumAssetCard(
             .joinToString(" · "),
         coverUrl = album.coverUrl,
         icon = { Icon(Icons.Rounded.LibraryMusic, contentDescription = null) },
+        onClick = onClick,
+    )
+}
+
+@Composable
+private fun ListeningRankCard(
+    rank: ListeningRankItem,
+    position: Int,
+    onClick: () -> Unit,
+) {
+    AssetRowCard(
+        title = rank.track.name,
+        subtitle = "第 ${position} 名 · 播放 ${rank.playCount} 次",
+        coverUrl = rank.track.coverUrl,
+        icon = { Icon(Icons.Rounded.QueryStats, contentDescription = null) },
         onClick = onClick,
     )
 }

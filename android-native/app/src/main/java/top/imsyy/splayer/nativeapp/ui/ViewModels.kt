@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.SavedStateHandle
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
@@ -14,6 +15,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import top.imsyy.splayer.nativeapp.BuildConfig
 import top.imsyy.splayer.nativeapp.AppSettingsProto
@@ -304,16 +306,15 @@ class MyViewModel @Inject constructor(
     private fun prewarmLikedPlaylist(playlist: PlaylistItem?) {
         likedPlaylistWarmJob?.cancel()
         val target = playlist ?: return
+        val cached = remoteRepository.peekCachedPlaylistDetail(target.id)
+        if (cached?.tracks?.size?.coerceAtLeast(0) ?: 0 >= 80) {
+            return
+        }
         likedPlaylistWarmJob = viewModelScope.launch {
-            delay(250)
+            delay(150)
             runCatching {
                 remoteRepository.fetchPlaylistPreviewDetail(target.id)
-            }.onSuccess { preview ->
-                if (preview.tracks.size < preview.trackCount) {
-                    runCatching {
-                        remoteRepository.fetchPlaylistInitialTracks(target.id)
-                    }
-                }
+                remoteRepository.fetchPlaylistInitialTracks(target.id)
             }
         }
     }
@@ -471,7 +472,7 @@ class PlaylistDetailViewModel @Inject constructor(
             runCatching {
                 remoteRepository.fetchPlaylistPreviewDetail(
                     playlistId = playlistId,
-                    forceRefresh = cached != null,
+                    forceRefresh = false,
                 )
             }.onSuccess { playlist ->
                 _uiState.value = PlaylistDetailUiState(
@@ -517,11 +518,15 @@ class PlaylistDetailViewModel @Inject constructor(
         }.onSuccess { page ->
             val latestState = _uiState.value
             val latestPlaylist = latestState.playlist ?: return@onSuccess
-            val mergedTracks = mergeTrackItems(latestPlaylist.tracks, page)
+            val pageResult = resolveMergedTrackPage(
+                existingTracks = latestPlaylist.tracks,
+                incomingTracks = page,
+                trackCount = latestPlaylist.trackCount,
+            )
             _uiState.value = latestState.copy(
-                playlist = latestPlaylist.copy(tracks = mergedTracks),
+                playlist = latestPlaylist.copy(tracks = pageResult.tracks),
                 primingFirstPage = false,
-                hasMore = mergedTracks.size < latestPlaylist.trackCount,
+                hasMore = pageResult.hasMore,
                 appendErrorMessage = null,
             )
         }.onFailure { error ->
@@ -548,11 +553,15 @@ class PlaylistDetailViewModel @Inject constructor(
                 )
             }.onSuccess { page ->
                 val latestPlaylist = _uiState.value.playlist ?: playlist
-                val mergedTracks = mergeTrackItems(latestPlaylist.tracks, page)
+                val pageResult = resolveMergedTrackPage(
+                    existingTracks = latestPlaylist.tracks,
+                    incomingTracks = page,
+                    trackCount = latestPlaylist.trackCount,
+                )
                 _uiState.value = _uiState.value.copy(
-                    playlist = latestPlaylist.copy(tracks = mergedTracks),
+                    playlist = latestPlaylist.copy(tracks = pageResult.tracks),
                     isAppending = false,
-                    hasMore = mergedTracks.size < latestPlaylist.trackCount,
+                    hasMore = pageResult.hasMore,
                     appendErrorMessage = null,
                 )
             }.onFailure { error ->
@@ -574,7 +583,14 @@ class PlaylistDetailViewModel @Inject constructor(
             isAppending = true,
             appendErrorMessage = null,
         )
-        while (mergedTracks.size < playlist.trackCount) {
+        var requestedPages = 0
+        val maxPages = resolveMaxPlaylistPageRequests(
+            loadedTrackCount = mergedTracks.size,
+            trackCount = playlist.trackCount,
+        )
+        var canContinue = true
+        while (canContinue && mergedTracks.size < playlist.trackCount && requestedPages < maxPages) {
+            requestedPages += 1
             val page = runCatching {
                 remoteRepository.fetchPlaylistTracksPage(
                     playlistId = playlist.id,
@@ -587,16 +603,21 @@ class PlaylistDetailViewModel @Inject constructor(
                 )
                 return mergedTracks
             }
-            if (page.isEmpty()) break
-            mergedTracks = mergeTrackItems(mergedTracks, page)
+            val pageResult = resolveMergedTrackPage(
+                existingTracks = mergedTracks,
+                incomingTracks = page,
+                trackCount = playlist.trackCount,
+            )
+            mergedTracks = pageResult.tracks
             _uiState.value = _uiState.value.copy(
                 playlist = playlist.copy(tracks = mergedTracks),
-                hasMore = mergedTracks.size < playlist.trackCount,
+                hasMore = pageResult.hasMore,
             )
+            canContinue = pageResult.hasMore
         }
         _uiState.value = _uiState.value.copy(
             isAppending = false,
-            hasMore = mergedTracks.size < playlist.trackCount,
+            hasMore = canContinue && mergedTracks.size < playlist.trackCount && requestedPages < maxPages,
             appendErrorMessage = null,
         )
         return mergedTracks
@@ -725,6 +746,7 @@ class PlayerViewModel @Inject constructor(
     private val _overlayState = MutableStateFlow(PlayerOverlayState())
     val overlayState: StateFlow<PlayerOverlayState> = _overlayState.asStateFlow()
     private var commentsPrewarmJob: Job? = null
+    private var lyricPrewarmJob: Job? = null
 
     init {
         viewModelScope.launch {
@@ -750,6 +772,27 @@ class PlayerViewModel @Inject constructor(
     fun cyclePlayMode() = playbackCoordinator.cyclePlayMode()
     fun seekTo(positionMs: Long) = playbackCoordinator.seekTo(positionMs)
     fun playQueueIndex(index: Int) = playbackCoordinator.playQueueIndex(index)
+    fun setPlayerScreenCadence(
+        playerScreenActive: Boolean,
+        lyricScreenActive: Boolean,
+        wordLevelLyricActive: Boolean,
+    ) = playbackCoordinator.setProgressCadence(
+        playerScreenActive = playerScreenActive,
+        lyricScreenActive = lyricScreenActive,
+        wordLevelLyricActive = wordLevelLyricActive,
+    )
+
+    fun setShowTranslation(enabled: Boolean) {
+        viewModelScope.launch {
+            lyricsPreferences.setShowTranslation(enabled)
+        }
+    }
+
+    fun setShowRomanized(enabled: Boolean) {
+        viewModelScope.launch {
+            lyricsPreferences.setShowRomanized(enabled)
+        }
+    }
 
     fun playSingleTrack(track: TrackItem) {
         viewModelScope.launch {
@@ -786,9 +829,17 @@ class PlayerViewModel @Inject constructor(
         val current = _screenState.value
         if (current.activeTrackId == track.id && (current.lyricLoading || current.lyrics.isNotEmpty())) {
             prewarmComments(track)
+            prewarmNextTrackLyrics(track)
             return
         }
         val cachedLyrics = remoteRepository.peekCachedLyrics(track.id).orEmpty()
+        val cachedHotComments = remoteRepository.peekCachedHotComments(track.id)
+        val cachedLatestComments = remoteRepository.peekCachedLatestComments(track.id, pageNo = 1)
+        val cachedCommentCount = resolveCommentPreviewCount(
+            existingCount = 0,
+            hotComments = cachedHotComments,
+            latestComments = cachedLatestComments,
+        )
         viewModelScope.launch {
             _screenState.value = _screenState.value.copy(
                 activeTrackId = track.id,
@@ -798,13 +849,16 @@ class PlayerViewModel @Inject constructor(
                 lyrics = cachedLyrics,
                 hotComments = emptyList(),
                 latestComments = emptyList(),
-                totalCommentCount = 0,
-                hotCommentCount = 0,
+                totalCommentCount = cachedCommentCount,
+                hotCommentCount = cachedHotComments?.let { page ->
+                    page.totalCount.coerceAtLeast(page.comments.size)
+                } ?: 0,
                 latestCommentPage = 1,
                 latestCommentHasMore = false,
                 commentTrackId = null,
             )
             prewarmComments(track)
+            prewarmNextTrackLyrics(track)
             if (cachedLyrics.isNotEmpty()) {
                 return@launch
             }
@@ -814,6 +868,24 @@ class PlayerViewModel @Inject constructor(
                 lyrics = lyrics,
                 lyricLoading = false,
             )
+        }
+    }
+
+    private fun prewarmNextTrackLyrics(track: TrackItem) {
+        val queue = playbackState.value.queue
+        val currentIndex = queue.indexOfFirst { item -> item.id == track.id }
+        if (currentIndex < 0) return
+        val nextTrack = queue.getOrNull(currentIndex + 1) ?: return
+        if (remoteRepository.peekCachedLyrics(nextTrack.id) != null) {
+            return
+        }
+        lyricPrewarmJob?.cancel()
+        lyricPrewarmJob = viewModelScope.launch {
+            delay(180)
+            if (_screenState.value.activeTrackId != track.id || playbackState.value.currentTrack?.id != track.id) {
+                return@launch
+            }
+            runCatching { remoteRepository.fetchLyrics(nextTrack) }
         }
     }
 
@@ -829,7 +901,7 @@ class PlayerViewModel @Inject constructor(
         viewModelScope.launch {
             _screenState.value = _screenState.value.copy(
                 commentTrackId = track.id,
-                commentLoading = cachedHotComments == null || cachedLatestComments == null,
+                commentLoading = cachedLatestComments == null,
                 loadingMoreComments = false,
                 hotComments = cachedHotComments?.comments.orEmpty(),
                 latestComments = cachedLatestComments?.comments.orEmpty(),
@@ -866,6 +938,7 @@ class PlayerViewModel @Inject constructor(
                 _screenState.value = _screenState.value.copy(
                     commentTrackId = track.id,
                     latestComments = latestComments.comments,
+                    commentLoading = false,
                     totalCommentCount = latestComments.totalCount.coerceAtLeast(cachedHotComments?.totalCount ?: 0),
                     latestCommentPage = 1,
                     latestCommentHasMore = latestComments.hasMore,
@@ -888,12 +961,17 @@ class PlayerViewModel @Inject constructor(
     private fun prewarmComments(track: TrackItem) {
         val cachedHotComments = remoteRepository.peekCachedHotComments(track.id)
         val cachedLatestComments = remoteRepository.peekCachedLatestComments(track.id, pageNo = 1)
+        publishCommentPreviewCount(
+            trackId = track.id,
+            hotComments = cachedHotComments,
+            latestComments = cachedLatestComments,
+        )
         if (cachedHotComments != null && cachedLatestComments != null) {
             return
         }
         commentsPrewarmJob?.cancel()
         commentsPrewarmJob = viewModelScope.launch {
-            delay(600)
+            delay(150)
             if (_screenState.value.activeTrackId != track.id || _overlayState.value.showComments) {
                 return@launch
             }
@@ -912,10 +990,35 @@ class PlayerViewModel @Inject constructor(
                 } else {
                     null
                 }
-                latestDeferred?.await()
-                hotDeferred?.await()
+                val latestComments = latestDeferred?.await()?.getOrNull() ?: cachedLatestComments
+                val hotComments = hotDeferred?.await()?.getOrNull() ?: cachedHotComments
+                publishCommentPreviewCount(
+                    trackId = track.id,
+                    hotComments = hotComments,
+                    latestComments = latestComments,
+                )
             }
         }
+    }
+
+    private fun publishCommentPreviewCount(
+        trackId: Long,
+        hotComments: CommentPageResult?,
+        latestComments: CommentPageResult?,
+    ) {
+        val state = _screenState.value
+        if (state.activeTrackId != trackId) return
+        _screenState.value = state.copy(
+            totalCommentCount = resolveCommentPreviewCount(
+                existingCount = state.totalCommentCount,
+                hotComments = hotComments,
+                latestComments = latestComments,
+            ),
+            hotCommentCount = maxOf(
+                state.hotCommentCount,
+                hotComments?.let { page -> page.totalCount.coerceAtLeast(page.comments.size) } ?: 0,
+            ),
+        )
     }
 
     fun loadMoreLatestComments() {
@@ -925,11 +1028,16 @@ class PlayerViewModel @Inject constructor(
         viewModelScope.launch {
             _screenState.value = _screenState.value.copy(loadingMoreComments = true)
             val nextPage = state.latestCommentPage + 1
+            val nextCursor = state.latestComments.lastOrNull()?.time?.takeIf { it > 0L }
             runCatching {
-                remoteRepository.fetchLatestComments(currentTrack.id, pageNo = nextPage)
+                remoteRepository.fetchLatestComments(
+                    currentTrack.id,
+                    pageNo = nextPage,
+                    cursor = nextCursor,
+                )
             }.onSuccess { page ->
                 _screenState.value = _screenState.value.copy(
-                    latestComments = _screenState.value.latestComments + page.comments,
+                    latestComments = mergeCommentItems(_screenState.value.latestComments, page.comments),
                     latestCommentPage = nextPage,
                     latestCommentHasMore = page.hasMore,
                     totalCommentCount = page.totalCount.coerceAtLeast(_screenState.value.totalCommentCount),
@@ -943,6 +1051,7 @@ class PlayerViewModel @Inject constructor(
 
     override fun onCleared() {
         commentsPrewarmJob?.cancel()
+        lyricPrewarmJob?.cancel()
         super.onCleared()
     }
 }
@@ -954,6 +1063,68 @@ private fun mergeTrackItems(
     if (existing.isEmpty()) return incoming
     if (incoming.isEmpty()) return existing
     return (existing + incoming).distinctBy { track -> track.id }
+}
+
+internal data class MergedTrackPage(
+    val tracks: List<TrackItem>,
+    val hasMore: Boolean,
+    val madeProgress: Boolean,
+)
+
+internal fun resolveMergedTrackPage(
+    existingTracks: List<TrackItem>,
+    incomingTracks: List<TrackItem>,
+    trackCount: Int,
+): MergedTrackPage {
+    if (incomingTracks.isEmpty()) {
+        return MergedTrackPage(
+            tracks = existingTracks,
+            hasMore = false,
+            madeProgress = false,
+        )
+    }
+    val mergedTracks = mergeTrackItems(existingTracks, incomingTracks)
+    val madeProgress = mergedTracks.size > existingTracks.size
+    return MergedTrackPage(
+        tracks = mergedTracks,
+        hasMore = madeProgress && mergedTracks.size < trackCount,
+        madeProgress = madeProgress,
+    )
+}
+
+internal fun resolveMaxPlaylistPageRequests(
+    loadedTrackCount: Int,
+    trackCount: Int,
+    pageSize: Int = 200,
+): Int {
+    val remaining = (trackCount - loadedTrackCount).coerceAtLeast(0)
+    if (remaining == 0) return 0
+    return ((remaining + pageSize - 1) / pageSize).coerceAtLeast(1) + 1
+}
+
+private fun mergeCommentItems(
+    existing: List<CommentItem>,
+    incoming: List<CommentItem>,
+): List<CommentItem> {
+    if (existing.isEmpty()) return incoming
+    if (incoming.isEmpty()) return existing
+    return (existing + incoming).distinctBy { comment -> comment.id }
+}
+
+internal fun resolveCommentPreviewCount(
+    existingCount: Int,
+    hotComments: CommentPageResult?,
+    latestComments: CommentPageResult?,
+): Int {
+    fun CommentPageResult.visibleCount(): Int {
+        return totalCount.coerceAtLeast(comments.size).coerceAtLeast(0)
+    }
+
+    return maxOf(
+        existingCount.coerceAtLeast(0),
+        hotComments?.visibleCount() ?: 0,
+        latestComments?.visibleCount() ?: 0,
+    )
 }
 
 data class SettingsUiState(
@@ -981,6 +1152,7 @@ class SettingsViewModel @Inject constructor(
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(SettingsUiState(apiRoot = appSettingsStore.apiRoot))
     val uiState: StateFlow<SettingsUiState> = _uiState.asStateFlow()
+    private var qrLoginJob: Job? = null
     private var qrPollingJob: Job? = null
 
     init {
@@ -1016,8 +1188,9 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun startQrLogin() {
+        qrLoginJob?.cancel()
         qrPollingJob?.cancel()
-        viewModelScope.launch {
+        val loginJob = viewModelScope.launch {
             _uiState.value = _uiState.value.copy(
                 qrVisible = true,
                 qrLoading = true,
@@ -1027,6 +1200,7 @@ class SettingsViewModel @Inject constructor(
             runCatching {
                 val key = remoteRepository.fetchQrKey()
                 val qrImage = remoteRepository.fetchQrImage(key)
+                if (!isActive) return@launch
                 _uiState.value = _uiState.value.copy(
                     qrImageUrl = qrImage,
                     qrLoading = false,
@@ -1034,7 +1208,7 @@ class SettingsViewModel @Inject constructor(
                     qrVisible = true,
                 )
                 qrPollingJob = launch {
-                    while (true) {
+                    while (isActive && _uiState.value.qrVisible && _uiState.value.currentUser == null) {
                         delay(2_000)
                         val result = remoteRepository.checkQrState(key)
                         if (result.cookieHeader.isNotBlank()) {
@@ -1049,12 +1223,22 @@ class SettingsViewModel @Inject constructor(
                         }
                         _uiState.value = _uiState.value.copy(qrStatusText = status)
                         if (result.code == 803 || result.code == 800) {
-                            if (result.code == 803) refreshAccount()
+                            if (result.code == 803) {
+                                _uiState.value = _uiState.value.copy(qrVisible = false)
+                                refreshAccount()
+                            }
                             break
+                        }
+                    }
+                }.also { job ->
+                    job.invokeOnCompletion {
+                        if (qrPollingJob === job) {
+                            qrPollingJob = null
                         }
                     }
                 }
             }.onFailure { error ->
+                if (error is CancellationException) return@launch
                 _uiState.value = _uiState.value.copy(
                     qrVisible = true,
                     qrLoading = false,
@@ -1063,10 +1247,27 @@ class SettingsViewModel @Inject constructor(
                 )
             }
         }
+        qrLoginJob = loginJob
+        loginJob.invokeOnCompletion {
+            if (qrLoginJob === loginJob) {
+                qrLoginJob = null
+            }
+        }
+    }
+
+    fun stopQrLogin() {
+        qrLoginJob?.cancel()
+        qrLoginJob = null
+        qrPollingJob?.cancel()
+        qrPollingJob = null
+        _uiState.value = _uiState.value.copy(
+            qrVisible = false,
+            qrLoading = false,
+        )
     }
 
     override fun onCleared() {
-        qrPollingJob?.cancel()
+        stopQrLogin()
         super.onCleared()
     }
 

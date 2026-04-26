@@ -403,7 +403,7 @@ const smoothScrollTo = (container: HTMLElement, targetY: number, duration = 300)
 /**
  * 歌词滚动
  */
-const lyricsScroll = (index: number) => {
+const lyricsScroll = (index: number, options: { instant?: boolean } = {}) => {
   const container = lyricScrollContainer.value;
   if (!container) return;
   // 用户滚动时不自动滚动
@@ -418,6 +418,14 @@ const lyricsScroll = (index: number) => {
   let targetY = elementTop - (containerHeight - elementHeight) * settingStore.lyricsScrollOffset;
   // 确保不超出边界
   targetY = Math.max(0, Math.min(targetY, container.scrollHeight - container.clientHeight));
+  if (options.instant) {
+    if (scrollAnimationId !== null) {
+      cancelAnimationFrame(scrollAnimationId);
+      scrollAnimationId = null;
+    }
+    container.scrollTop = targetY;
+    return;
+  }
   // 执行平滑滚动
   smoothScrollTo(container, targetY, 500);
 };
@@ -576,7 +584,7 @@ watch(firstActiveIndex, (val, oldVal) => {
 
 onMounted(() => {
   nextTick().then(() => {
-    lyricsScroll(firstActiveIndex.value);
+    lyricsScroll(firstActiveIndex.value, { instant: true });
   });
   if (isElectron) {
     window.electron.ipcRenderer.on("lyricsScroll", () => lyricsScroll(firstActiveIndex.value));

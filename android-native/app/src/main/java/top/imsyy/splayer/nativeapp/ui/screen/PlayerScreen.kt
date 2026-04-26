@@ -1,7 +1,14 @@
 package top.imsyy.splayer.nativeapp.ui.screen
 
+import android.os.SystemClock
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
@@ -14,14 +21,12 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -32,7 +37,6 @@ import androidx.compose.material.icons.automirrored.rounded.NavigateBefore
 import androidx.compose.material.icons.automirrored.rounded.NavigateNext
 import androidx.compose.material.icons.automirrored.rounded.QueueMusic
 import androidx.compose.material.icons.rounded.ChatBubble
-import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
@@ -50,6 +54,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -67,12 +72,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -82,6 +91,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.layout.ContentScale
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
@@ -93,6 +103,7 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.isActive
 import top.imsyy.splayer.nativeapp.R
 import top.imsyy.splayer.nativeapp.model.CommentItem
 import top.imsyy.splayer.nativeapp.model.LyricLineUi
@@ -118,11 +129,33 @@ fun PlayerScreen(
     LaunchedEffect(track?.id) {
         viewModel.loadTrackMeta(track)
         lyricMode = false
+        seekPreviewPosition = playbackState.positionMs.toFloat()
+        seeking = false
     }
-    LaunchedEffect(playbackState.positionMs, track?.id, seeking) {
-        if (!seeking) {
-            seekPreviewPosition = playbackState.positionMs.toFloat()
+    DisposableEffect(viewModel) {
+        onDispose {
+            viewModel.setPlayerScreenCadence(
+                playerScreenActive = false,
+                lyricScreenActive = false,
+                wordLevelLyricActive = false,
+            )
         }
+    }
+    val wordLyricCadenceActive by remember(
+        lyricMode,
+        screenState.lyrics,
+        track?.id,
+    ) {
+        derivedStateOf {
+            lyricMode && hasWordLevelLyric(screenState.lyrics)
+        }
+    }
+    LaunchedEffect(track?.id, lyricMode, wordLyricCadenceActive) {
+        viewModel.setPlayerScreenCadence(
+            playerScreenActive = true,
+            lyricScreenActive = lyricMode,
+            wordLevelLyricActive = wordLyricCadenceActive,
+        )
     }
 
     Box(
@@ -148,129 +181,152 @@ fun PlayerScreen(
 
         val sliderValue = if (seeking) seekPreviewPosition else playbackState.positionMs.toFloat()
 
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-        ) {
-            PlayerTopBar(
-                track = track,
-                lyricMode = lyricMode,
-                onClose = onClose,
-            )
-
-            Spacer(Modifier.height(4.dp))
-
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
-            ) {
-                if (lyricMode) {
-                    LyricStage(
-                        lyrics = screenState.lyrics,
-                        currentPositionMs = playbackState.positionMs,
-                        loading = screenState.lyricLoading,
-                        showTranslation = screenState.showTranslation,
-                        showRomanized = screenState.showRomanized,
-                        lyricFontScale = screenState.lyricFontScale,
-                        onExitLyric = { lyricMode = false },
-                        onSeekToLine = { line -> viewModel.seekTo(line.startTimeMs) },
-                    )
-                } else {
-                    CoverStage(
-                        track = track,
-                        commentCount = screenState.totalCommentCount,
-                        onOpenLyric = { lyricMode = true },
-                        onOpenComments = viewModel::openCommentsSheet,
-                    )
-                }
-            }
-
-            Spacer(Modifier.height(6.dp))
-
-            Slider(
-                value = sliderValue.coerceIn(0f, playbackState.durationMs.coerceAtLeast(1L).toFloat()),
-                onValueChange = {
-                    seeking = true
-                    seekPreviewPosition = it
-                },
-                onValueChangeFinished = {
-                    viewModel.seekTo(seekPreviewPosition.toLong())
-                    seeking = false
-                },
-                valueRange = 0f..playbackState.durationMs.coerceAtLeast(1L).toFloat(),
-            )
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Text(formatDuration(sliderValue.toLong()))
-                Text(formatDuration(playbackState.durationMs))
-            }
-
-            if (playbackState.isBuffering) {
-                Text(
-                    text = "缓冲中，系统进度已冻结",
-                    modifier = Modifier.padding(top = 6.dp),
-                    color = MaterialTheme.colorScheme.primary,
-                    style = MaterialTheme.typography.labelLarge,
+        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+            val stageHeightDp = remember(maxHeight, lyricMode) {
+                resolvePlayerStageHeightDp(
+                    viewportHeightDp = maxHeight.value,
+                    lyricMode = lyricMode,
                 )
-            } else {
-                playbackState.errorMessage?.takeIf { it.isNotBlank() }?.let { message ->
-                    Text(
-                        text = message,
-                        modifier = Modifier.padding(top = 6.dp),
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.labelLarge,
-                    )
-                }
             }
-
-            Row(
+            val bottomSafeGapDp = remember(maxHeight) {
+                resolvePlayerBottomSafeGapDp(maxHeight.value)
+            }
+            Column(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 8.dp, bottom = 4.dp)
-                    .navigationBarsPadding(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceAround,
+                    .fillMaxSize()
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
             ) {
-                IconButton(onClick = viewModel::cyclePlayMode) {
-                    PlayModeIcon(playbackState.playMode)
-                }
-                IconButton(onClick = viewModel::skipPrevious) {
-                    Icon(
-                        Icons.AutoMirrored.Rounded.NavigateBefore,
-                        contentDescription = "上一首",
-                        modifier = Modifier.size(34.dp),
-                    )
-                }
+                PlayerTopBar(
+                    track = track,
+                    lyricMode = lyricMode,
+                    onClose = onClose,
+                )
+
+                Spacer(Modifier.height(4.dp))
+
                 Box(
                     modifier = Modifier
-                        .size(78.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.primary)
-                        .clickable { viewModel.togglePlayback() },
-                    contentAlignment = Alignment.Center,
+                        .fillMaxWidth()
+                        .height(stageHeightDp.dp),
                 ) {
-                    Icon(
-                        imageVector = if (playbackState.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                        contentDescription = "播放暂停",
-                        modifier = Modifier.size(34.dp),
-                        tint = MaterialTheme.colorScheme.onPrimary,
+                    if (lyricMode) {
+                        LyricStage(
+                            lyrics = screenState.lyrics,
+                            currentPositionMs = playbackState.positionMs,
+                            loading = screenState.lyricLoading,
+                            showTranslation = screenState.showTranslation,
+                            showRomanized = screenState.showRomanized,
+                            lyricFontScale = screenState.lyricFontScale,
+                            onExitLyric = { lyricMode = false },
+                            onSeekToLine = { line -> viewModel.seekTo(line.startTimeMs) },
+                        )
+                    } else {
+                        CoverStage(
+                            track = track,
+                            commentCount = screenState.totalCommentCount,
+                            isPlaying = playbackState.isPlaying,
+                            isBuffering = playbackState.isBuffering,
+                            onOpenLyric = { lyricMode = true },
+                            onOpenComments = viewModel::openCommentsSheet,
+                        )
+                    }
+                }
+
+                if (lyricMode) {
+                    LyricDisplayToggleRow(
+                        showTranslation = screenState.showTranslation,
+                        showRomanized = screenState.showRomanized,
+                        onToggleTranslation = { viewModel.setShowTranslation(!screenState.showTranslation) },
+                        onToggleRomanized = { viewModel.setShowRomanized(!screenState.showRomanized) },
                     )
+                    Spacer(Modifier.height(resolvePlayerStageToProgressGapDp(lyricMode).dp))
+                } else {
+                    Spacer(Modifier.height(resolvePlayerStageToProgressGapDp(lyricMode).dp))
                 }
-                IconButton(onClick = viewModel::skipNext) {
-                    Icon(
-                        Icons.AutoMirrored.Rounded.NavigateNext,
-                        contentDescription = "下一首",
-                        modifier = Modifier.size(34.dp),
+
+                Slider(
+                    value = sliderValue.coerceIn(0f, playbackState.durationMs.coerceAtLeast(1L).toFloat()),
+                    onValueChange = {
+                        seeking = true
+                        seekPreviewPosition = it
+                    },
+                    onValueChangeFinished = {
+                        viewModel.seekTo(seekPreviewPosition.toLong())
+                        seeking = false
+                    },
+                    valueRange = 0f..playbackState.durationMs.coerceAtLeast(1L).toFloat(),
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text(formatDuration(sliderValue.toLong()))
+                    Text(formatDuration(playbackState.durationMs))
+                }
+
+                if (playbackState.isBuffering) {
+                    Text(
+                        text = "缓冲中，系统进度已冻结",
+                        modifier = Modifier.padding(top = 6.dp),
+                        color = MaterialTheme.colorScheme.primary,
+                        style = MaterialTheme.typography.labelLarge,
                     )
+                } else {
+                    playbackState.errorMessage?.takeIf { it.isNotBlank() }?.let { message ->
+                        Text(
+                            text = message,
+                            modifier = Modifier.padding(top = 6.dp),
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.labelLarge,
+                        )
+                    }
                 }
-                IconButton(onClick = viewModel::openQueueSheet) {
-                    Icon(Icons.AutoMirrored.Rounded.QueueMusic, contentDescription = "播放队列")
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp, bottom = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceAround,
+                ) {
+                    IconButton(onClick = viewModel::cyclePlayMode) {
+                        PlayModeIcon(playbackState.playMode)
+                    }
+                    IconButton(onClick = viewModel::skipPrevious) {
+                        Icon(
+                            Icons.AutoMirrored.Rounded.NavigateBefore,
+                            contentDescription = "上一首",
+                            modifier = Modifier.size(34.dp),
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .size(78.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.primary)
+                            .clickable { viewModel.togglePlayback() },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = if (playbackState.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                            contentDescription = "播放暂停",
+                            modifier = Modifier.size(34.dp),
+                            tint = MaterialTheme.colorScheme.onPrimary,
+                        )
+                    }
+                    IconButton(onClick = viewModel::skipNext) {
+                        Icon(
+                            Icons.AutoMirrored.Rounded.NavigateNext,
+                            contentDescription = "下一首",
+                            modifier = Modifier.size(34.dp),
+                        )
+                    }
+                    IconButton(onClick = viewModel::openQueueSheet) {
+                        Icon(Icons.AutoMirrored.Rounded.QueueMusic, contentDescription = "播放队列")
+                    }
                 }
+                Spacer(Modifier.height(bottomSafeGapDp.dp))
             }
         }
 
@@ -472,12 +528,82 @@ private fun PlayerTopBar(
 }
 
 @Composable
+private fun LyricDisplayToggleRow(
+    showTranslation: Boolean,
+    showRomanized: Boolean,
+    onToggleTranslation: () -> Unit,
+    onToggleRomanized: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.Start,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Row(
+            modifier = Modifier
+                .clip(RoundedCornerShape(999.dp))
+                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.78f))
+                .padding(3.dp),
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            LyricDisplayToggleChip(
+                text = "译",
+                selected = showTranslation,
+                onClick = onToggleTranslation,
+            )
+            LyricDisplayToggleChip(
+                text = "音",
+                selected = showRomanized,
+                onClick = onToggleRomanized,
+            )
+        }
+    }
+}
+
+@Composable
+private fun LyricDisplayToggleChip(
+    text: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val backgroundColor = if (selected) {
+        MaterialTheme.colorScheme.primary.copy(alpha = 0.96f)
+    } else {
+        Color.Transparent
+    }
+    val contentColor = if (selected) {
+        MaterialTheme.colorScheme.onPrimary
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    Box(
+        modifier = Modifier
+            .height(30.dp)
+            .width(40.dp)
+            .clip(RoundedCornerShape(999.dp))
+            .background(backgroundColor)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = text,
+            color = contentColor,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.Bold,
+        )
+    }
+}
+
+@Composable
 private fun CoverStage(
     track: TrackItem,
     commentCount: Int,
+    isPlaying: Boolean,
+    isBuffering: Boolean,
     onOpenLyric: () -> Unit,
     onOpenComments: () -> Unit,
-    ) {
+) {
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val layout = remember(maxWidth, maxHeight) {
             resolveCoverStageLayout(
@@ -485,31 +611,50 @@ private fun CoverStage(
                 maxHeightDp = maxHeight.value,
             )
         }
+        val animateDisc = shouldRunDiscRotation(
+            isPlaying = isPlaying,
+            isBuffering = isBuffering,
+        )
+        val discRotation = remember(track.id) { Animatable(0f) }
+        LaunchedEffect(track.id, animateDisc) {
+            if (!animateDisc) {
+                discRotation.stop()
+                return@LaunchedEffect
+            }
+            while (isActive) {
+                val startRotation = normalizeDiscRotation(discRotation.value)
+                discRotation.snapTo(startRotation)
+                discRotation.animateTo(
+                    targetValue = startRotation + 360f,
+                    animationSpec = tween(
+                        durationMillis = DISC_ROTATION_CYCLE_MS,
+                        easing = LinearEasing,
+                    ),
+                )
+            }
+        }
         val discSize = layout.discSizeDp.dp
         val artworkSize = layout.artworkSizeDp.dp
         val toneArmSlotWidth = layout.toneArmSlotWidthDp.dp
         val toneArmSlotHeight = layout.toneArmSlotHeightDp.dp
-        val compositionSize = max(
-            layout.discSizeDp + 28f,
-            layout.toneArmSlotWidthDp + 72f,
-        ).dp
+        val compositionSize = layout.compositionSizeDp.dp
 
-        Column(
-            modifier = Modifier.fillMaxSize(),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Top,
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(top = layout.stageTopOffsetDp.dp),
         ) {
             Box(
                 modifier = Modifier
+                    .align(Alignment.TopCenter)
                     .fillMaxWidth()
-                    .heightIn(min = min(layout.visualZoneHeightDp, this@BoxWithConstraints.maxHeight.value).dp)
-                    .weight(1f, fill = true),
-                contentAlignment = Alignment.Center,
+                    .height(min(layout.visualZoneHeightDp, this@BoxWithConstraints.maxHeight.value).dp),
+                contentAlignment = Alignment.TopCenter,
             ) {
                 Box(
                     modifier = Modifier
                         .size(compositionSize)
-                        .offset(y = layout.visualOffsetYDp.dp),
+                        .offset(y = layout.visualTopInsetDp.dp),
                     contentAlignment = Alignment.Center,
                 ) {
                     ToneArmDecoration(
@@ -525,6 +670,7 @@ private fun CoverStage(
                     Box(
                         modifier = Modifier
                             .size(discSize)
+                            .rotate(normalizeDiscRotation(discRotation.value))
                             .clip(CircleShape)
                             .background(Color(0xFF0F131B))
                             .align(Alignment.BottomCenter)
@@ -549,6 +695,7 @@ private fun CoverStage(
                             modifier = Modifier
                                 .size(artworkSize)
                                 .clip(CircleShape),
+                            contentScale = ContentScale.Crop,
                         )
                         Box(
                             modifier = Modifier
@@ -561,29 +708,35 @@ private fun CoverStage(
             }
             Column(
                 modifier = Modifier
+                    .align(Alignment.BottomCenter)
                     .fillMaxWidth()
-                    .padding(bottom = 2.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                    .padding(bottom = layout.infoBottomPaddingDp.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                Text(
-                    text = track.name,
-                    style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    text = track.artists,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(7.dp),
+                    ) {
+                        Text(
+                            text = track.name,
+                            style = MaterialTheme.typography.headlineMedium,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            text = track.artists,
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                     Row(
                         modifier = Modifier
                             .clip(RoundedCornerShape(999.dp))
@@ -645,21 +798,36 @@ private fun LyricStage(
             ),
     ) {
         val density = LocalDensity.current
-        val lyricListState = rememberLazyListState()
+        val viewConfiguration = LocalViewConfiguration.current
+        val initialLineIndex = remember(lyrics) {
+            lyrics.indexOfCurrentLine(currentPositionMs).coerceAtLeast(0)
+        }
+        val lyricListState = rememberLazyListState(
+            initialFirstVisibleItemIndex = (initialLineIndex + 1).coerceAtMost(lyrics.size),
+        )
         val lineHeightsPx = remember(lyrics) { mutableStateMapOf<Int, Int>() }
         val viewportLayout = remember(maxHeight) {
             resolveLyricViewportLayout(
                 viewportHeightDp = maxHeight.value,
             )
         }
-        val viewportHeightPx = remember(maxHeight, density) {
+        val lyricContentWidthDp = remember(maxWidth) {
+            resolveLyricContentWidthDp(maxWidth.value)
+        }
+        val fallbackViewportHeightPx = remember(maxHeight, density) {
             with(density) { maxHeight.roundToPx() }
+        }
+        val viewportHeightPx by remember(lyricListState, fallbackViewportHeightPx) {
+            derivedStateOf {
+                resolveLyricViewportHeightPx(
+                    viewportStart = lyricListState.layoutInfo.viewportStartOffset,
+                    viewportEnd = lyricListState.layoutInfo.viewportEndOffset,
+                    fallbackHeightPx = fallbackViewportHeightPx,
+                )
+            }
         }
         val edgeMinPaddingPx = remember(viewportLayout, density) {
             with(density) { viewportLayout.edgeMinPaddingDp.dp.roundToPx() }
-        }
-        val lineSpacingPx = remember(viewportLayout, density) {
-            with(density) { viewportLayout.lineSpacingDp.dp.roundToPx() }
         }
         val firstLineHeightPx = lineHeightsPx[0] ?: estimateLyricLineHeightPx(
             line = lyrics.first(),
@@ -679,261 +847,402 @@ private fun LyricStage(
             viewportHeightPx = viewportHeightPx,
             lineHeightPx = firstLineHeightPx,
             minimumPaddingPx = edgeMinPaddingPx,
-            betweenItemSpacingPx = lineSpacingPx,
         )
         val bottomSpacerPx = resolveLyricEdgeSpacerPx(
             viewportHeightPx = viewportHeightPx,
             lineHeightPx = lastLineHeightPx,
             minimumPaddingPx = edgeMinPaddingPx,
-            betweenItemSpacingPx = lineSpacingPx,
         )
         val currentLineIndex by remember(lyrics, currentPositionMs) {
             derivedStateOf { lyrics.indexOfCurrentLine(currentPositionMs) }
         }
-        var manualPreviewMode by remember(lyrics) { mutableStateOf(false) }
+        var scrollMode by remember(lyrics) { mutableStateOf(LyricScrollMode.AutoFollow) }
         var previewLineIndex by remember(lyrics) { mutableIntStateOf(-1) }
+        var pendingPreviewSeekTargetLineIndex by remember(lyrics) { mutableIntStateOf(-1) }
+        var lastAutoCenteredLineIndex by remember(lyrics) { mutableIntStateOf(-1) }
+        var initialAutoCenterSettled by remember(lyrics) { mutableStateOf(false) }
         var autoScrolling by remember(lyrics) { mutableStateOf(false) }
+        var userScrollActive by remember(lyrics) { mutableStateOf(false) }
+        var ignoreScrollSignalsUntilMs by remember(lyrics) { mutableStateOf(0L) }
+        val previewLine = lyrics.getOrNull(previewLineIndex)
 
-        suspend fun centerLyricLine(lineIndex: Int) {
-            if (lineIndex !in lyrics.indices) return
+        suspend fun centerLyricLine(lineIndex: Int, animate: Boolean): Boolean {
+            if (lineIndex !in lyrics.indices) return false
             val targetItemIndex = lineIndex + 1
             if (lyricListState.layoutInfo.visibleItemsInfo.none { it.index == targetItemIndex }) {
-                lyricListState.scrollToItem(targetItemIndex)
+                if (animate) {
+                    lyricListState.animateScrollToItem(targetItemIndex)
+                } else {
+                    lyricListState.scrollToItem(targetItemIndex)
+                }
                 withFrameNanos { }
             }
-            val firstTargetItem = lyricListState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == targetItemIndex }
-                ?: return
-            val firstCenterDelta = resolveLyricScrollAdjustmentPx(
-                itemCenterY = firstTargetItem.offset + firstTargetItem.size / 2f,
-                viewportStart = lyricListState.layoutInfo.viewportStartOffset,
-                viewportEnd = lyricListState.layoutInfo.viewportEndOffset,
-            )
-            if (abs(firstCenterDelta) > 1f) {
-                lyricListState.animateScrollBy(firstCenterDelta)
+            repeat(3) {
+                val targetItem = lyricListState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == targetItemIndex }
+                    ?: return@repeat
+                val centerDelta = resolveLyricScrollAdjustmentPx(
+                    itemCenterY = targetItem.offset + targetItem.size / 2f,
+                    viewportStart = lyricListState.layoutInfo.viewportStartOffset,
+                    viewportEnd = lyricListState.layoutInfo.viewportEndOffset,
+                )
+                if (abs(centerDelta) <= 0.5f) return true
+                if (animate) {
+                    lyricListState.animateScrollBy(
+                        value = centerDelta,
+                        animationSpec = tween(durationMillis = LYRIC_AUTO_CENTER_ANIMATION_MS),
+                    )
+                } else {
+                    lyricListState.scrollBy(centerDelta)
+                }
                 withFrameNanos { }
             }
-            val settledTargetItem = lyricListState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == targetItemIndex }
-                ?: return
-            val settledCenterDelta = resolveLyricScrollAdjustmentPx(
-                itemCenterY = settledTargetItem.offset + settledTargetItem.size / 2f,
-                viewportStart = lyricListState.layoutInfo.viewportStartOffset,
-                viewportEnd = lyricListState.layoutInfo.viewportEndOffset,
-            )
-            if (abs(settledCenterDelta) > 0.5f) {
-                lyricListState.scrollBy(settledCenterDelta)
-            }
+            return lyricListState.layoutInfo.visibleItemsInfo
+                .firstOrNull { it.index == targetItemIndex }
+                ?.let { targetItem ->
+                    abs(
+                        calculateLyricCenterDelta(
+                            itemCenterY = targetItem.offset + targetItem.size / 2f,
+                            viewportStart = lyricListState.layoutInfo.viewportStartOffset,
+                            viewportEnd = lyricListState.layoutInfo.viewportEndOffset,
+                        ),
+                    ) <= 1f
+                }
+                ?: false
         }
 
-        LaunchedEffect(lyricListState) {
-            snapshotFlow { lyricListState.isScrollInProgress }
+        LaunchedEffect(lyricListState, lyrics) {
+            snapshotFlow {
+                Triple(
+                    lyricListState.isScrollInProgress,
+                    lyricListState.layoutInfo.centeredVisibleLyricIndex(
+                        firstLyricItemIndex = 1,
+                        lyricCount = lyrics.size,
+                    ),
+                    userScrollActive,
+                )
+            }
                 .distinctUntilChanged()
-                .collect { isScrolling ->
-                    if (isScrolling && !autoScrolling) {
-                        manualPreviewMode = true
-                        previewLineIndex = lyricListState.layoutInfo.centeredVisibleLyricIndex(
-                            firstLyricItemIndex = 1,
-                            lyricCount = lyrics.size,
-                        ) ?: currentLineIndex
+                .collect { (isScrolling, centeredIndex, userDragging) ->
+                    val ignoreAutoScrollSignals = SystemClock.elapsedRealtime() < ignoreScrollSignalsUntilMs
+                    if (
+                        shouldEnterManualPreview(
+                            isScrollInProgress = isScrolling,
+                            autoScrolling = autoScrolling,
+                            userScrollActive = userDragging,
+                            ignoreAutoScrollSignals = ignoreAutoScrollSignals,
+                            centeredIndex = centeredIndex,
+                            currentLineIndex = currentLineIndex,
+                        )
+                    ) {
+                        scrollMode = LyricScrollMode.ManualPreview
+                        previewLineIndex = centeredIndex ?: currentLineIndex
                     }
                 }
         }
 
-        LaunchedEffect(lyricListState, manualPreviewMode, currentLineIndex) {
-            if (!manualPreviewMode) {
+        LaunchedEffect(lyricListState, scrollMode, lyrics) {
+            if (scrollMode == LyricScrollMode.AutoFollow) {
                 previewLineIndex = currentLineIndex
                 return@LaunchedEffect
             }
             snapshotFlow {
-                lyricListState.layoutInfo.centeredVisibleLyricIndex(
-                    firstLyricItemIndex = 1,
-                    lyricCount = lyrics.size,
+                Triple(
+                    lyricListState.isScrollInProgress,
+                    userScrollActive,
+                    lyricListState.layoutInfo.centeredVisibleLyricIndex(
+                        firstLyricItemIndex = 1,
+                        lyricCount = lyrics.size,
+                    ),
                 )
             }
                 .distinctUntilChanged()
-                .collect { centeredIndex ->
-                    previewLineIndex = centeredIndex ?: currentLineIndex
+                .collect { (isScrollInProgress, userDragging, centeredIndex) ->
+                    if (shouldUpdateManualPreviewAnchor(
+                            mode = scrollMode,
+                            isScrollInProgress = isScrollInProgress,
+                            userScrollActive = userDragging,
+                            centeredIndex = centeredIndex,
+                        )
+                    ) {
+                        previewLineIndex = centeredIndex ?: return@collect
+                    }
                 }
         }
 
-        LaunchedEffect(currentLineIndex, manualPreviewMode, lyrics, viewportLayout, topSpacerPx, bottomSpacerPx) {
-            if (!manualPreviewMode && currentLineIndex >= 0) {
-                autoScrolling = true
-                try {
-                    centerLyricLine(currentLineIndex)
-                } finally {
-                    autoScrolling = false
-                }
+        LaunchedEffect(scrollMode) {
+            if (scrollMode != LyricScrollMode.AutoFollow) {
+                lastAutoCenteredLineIndex = -1
             }
         }
 
-        LaunchedEffect(
-            manualPreviewMode,
-            previewLineIndex,
-            topSpacerPx,
-            bottomSpacerPx,
-            lyricListState.isScrollInProgress,
-        ) {
-            if (!manualPreviewMode || lyricListState.isScrollInProgress || previewLineIndex !in lyrics.indices) {
+        LaunchedEffect(currentLineIndex, scrollMode, topSpacerPx, bottomSpacerPx, pendingPreviewSeekTargetLineIndex) {
+            if (!shouldBlockAutoCenterForPendingPreviewSeek(pendingPreviewSeekTargetLineIndex, currentLineIndex)) {
+                pendingPreviewSeekTargetLineIndex = -1
+            }
+            if (shouldBlockAutoCenterForPendingPreviewSeek(pendingPreviewSeekTargetLineIndex, currentLineIndex)) {
                 return@LaunchedEffect
             }
-            autoScrolling = true
-            try {
-                withFrameNanos { }
-                centerLyricLine(previewLineIndex)
-            } finally {
-                autoScrolling = false
+            if (shouldAutoCenterLyricLine(scrollMode, currentLineIndex, lastAutoCenteredLineIndex)) {
+                ignoreScrollSignalsUntilMs = SystemClock.elapsedRealtime() + 640L
+                autoScrolling = true
+                userScrollActive = false
+                val animateCenter = initialAutoCenterSettled
+                try {
+                    if (centerLyricLine(currentLineIndex, animate = animateCenter)) {
+                        lastAutoCenteredLineIndex = currentLineIndex
+                    }
+                } finally {
+                    initialAutoCenterSettled = true
+                    autoScrolling = false
+                    ignoreScrollSignalsUntilMs = SystemClock.elapsedRealtime() + 420L
+                }
             }
         }
 
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            state = lyricListState,
-            contentPadding = PaddingValues(
-                top = viewportLayout.topPaddingDp.dp,
-                bottom = viewportLayout.bottomPaddingDp.dp,
-            ),
-            verticalArrangement = Arrangement.spacedBy(viewportLayout.lineSpacingDp.dp),
-        ) {
-            item(key = "lyric-top-spacer") {
-                Spacer(
-                    modifier = Modifier.height(
-                        with(density) { topSpacerPx.toDp() },
-                    ),
-                )
-            }
-            itemsIndexed(lyrics, key = { _, line -> "${line.startTimeMs}-${line.mainText}" }) { index, line ->
-                val currentActive = index == currentLineIndex
-                val previewActive = manualPreviewMode && index == previewLineIndex
-                val emphasizeLine = previewActive || (!manualPreviewMode && currentActive)
-                val mainTextColor = when {
-                    previewActive -> MaterialTheme.colorScheme.onSurface
-                    currentActive && !manualPreviewMode -> MaterialTheme.colorScheme.onSurface
-                    else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.34f)
-                }
-                val upcomingWordColor = when {
-                    previewActive -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-                    currentActive && !manualPreviewMode -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.36f)
-                    else -> mainTextColor
-                }
-                val onLineClick = onExitLyric
-                val onPreviewSeek = {
-                    manualPreviewMode = false
-                    previewLineIndex = currentLineIndex
-                    onSeekToLine(line)
-                }
-                val lyricText = remember(
-                    line,
-                    currentPositionMs,
-                    currentActive,
-                    manualPreviewMode,
-                    previewActive,
-                    mainTextColor,
-                    upcomingWordColor,
-                ) {
-                    buildLyricAnnotatedText(
-                        line = line,
-                        currentPositionMs = currentPositionMs,
-                        wordHighlightEnabled = currentActive && !manualPreviewMode && !previewActive,
-                        emphasizedColor = mainTextColor,
-                        upcomingColor = upcomingWordColor,
+        Box(modifier = Modifier.fillMaxSize()) {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .pointerInput(lyrics, viewConfiguration) {
+                        awaitEachGesture {
+                            val down = awaitFirstDown(requireUnconsumed = false)
+                            userScrollActive = false
+                            var dragStarted = false
+                            do {
+                                val event = awaitPointerEvent(PointerEventPass.Initial)
+                                val dragChange = event.changes.firstOrNull { it.id == down.id }
+                                    ?: break
+                                if (!dragChange.pressed) break
+                                if (!dragStarted && abs(dragChange.position.y - down.position.y) >= viewConfiguration.touchSlop) {
+                                    dragStarted = true
+                                }
+                                userScrollActive = dragStarted
+                            } while (true)
+                            userScrollActive = false
+                        }
+                    },
+                state = lyricListState,
+                contentPadding = PaddingValues(
+                    top = viewportLayout.topPaddingDp.dp,
+                    bottom = viewportLayout.bottomPaddingDp.dp,
+                ),
+                verticalArrangement = Arrangement.spacedBy(viewportLayout.lineSpacingDp.dp),
+            ) {
+                item(key = "lyric-top-spacer") {
+                    Spacer(
+                        modifier = Modifier.height(
+                            with(density) { topSpacerPx.toDp() },
+                        ),
                     )
                 }
+                itemsIndexed(lyrics, key = { _, line -> "${line.startTimeMs}-${line.mainText}" }) { index, line ->
+                    val currentActive = index == currentLineIndex
+                    val previewActive = scrollMode == LyricScrollMode.ManualPreview && index == previewLineIndex
+                    val currentHighlightActive = currentActive && !previewActive
+                    val emphasizeLine = previewActive || currentHighlightActive
+                    val lineHasWordTiming = remember(line) { usesWordLevelLyric(line) }
+                    val highlightScale by animateFloatAsState(
+                        targetValue = when {
+                            previewActive -> 1.035f
+                            currentHighlightActive && lineHasWordTiming -> 1.04f
+                            currentHighlightActive -> 1.028f
+                            else -> 1f
+                        },
+                        label = "lyric-line-scale",
+                    )
+                    val mainTextColor = when {
+                        previewActive -> MaterialTheme.colorScheme.onSurface
+                        currentHighlightActive -> MaterialTheme.colorScheme.onSurface
+                        else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.42f)
+                    }
+                    val upcomingWordColor = when {
+                        previewActive -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.82f)
+                        currentHighlightActive && lineHasWordTiming -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.24f)
+                        currentHighlightActive -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                        else -> mainTextColor
+                    }
+                    val highlightPositionKey = if (currentHighlightActive) {
+                        currentPositionMs
+                    } else {
+                        Long.MIN_VALUE
+                    }
+                    val lyricText = remember(
+                        line,
+                        highlightPositionKey,
+                        currentActive,
+                        scrollMode,
+                        previewActive,
+                        mainTextColor,
+                        upcomingWordColor,
+                    ) {
+                        buildLyricAnnotatedText(
+                            line = line,
+                            currentPositionMs = currentPositionMs,
+                            wordHighlightEnabled = currentHighlightActive,
+                            emphasizedColor = mainTextColor,
+                            upcomingColor = upcomingWordColor,
+                        )
+                    }
 
-                Column(
-                    modifier = Modifier
-                        .widthIn(max = 620.dp)
-                        .fillMaxWidth()
-                        .onSizeChanged { lineHeightsPx[index] = it.height }
-                        .clip(RoundedCornerShape(if (previewActive) 24.dp else 0.dp))
-                        .background(
-                            if (previewActive) {
-                                MaterialTheme.colorScheme.surface.copy(alpha = 0.94f)
-                            } else {
-                                Color.Transparent
-                            },
-                        )
-                        .clickable(
-                            interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
-                            indication = null,
-                            onClick = onLineClick,
-                        )
-                        .padding(
-                            horizontal = viewportLayout.horizontalPaddingDp.dp,
-                            vertical = if (previewActive) viewportLayout.previewPaddingDp.dp else viewportLayout.linePaddingDp.dp,
-                        ),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    if (previewActive) {
-                        Row(
+                    Box(
+                        modifier = Modifier.fillMaxWidth(),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Column(
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(999.dp))
-                                .clickable(onClick = onPreviewSeek)
-                                .padding(horizontal = 4.dp, vertical = 2.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
+                                .width(lyricContentWidthDp.dp)
+                                .onSizeChanged { lineHeightsPx[index] = it.height }
+                                .clip(RoundedCornerShape(if (previewActive) 24.dp else 0.dp))
+                                .background(
+                                    Color.Transparent,
+                                )
+                                .clickable(
+                                    interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                                    indication = null,
+                                    onClick = {
+                                        when (resolveLyricTapAction(scrollMode, LyricTapTarget.Line)) {
+                                            LyricTapAction.ExitToCover -> onExitLyric()
+                                            LyricTapAction.SeekPreviewLine -> Unit
+                                        }
+                                    },
+                                )
+                                .padding(
+                                    horizontal = viewportLayout.horizontalPaddingDp.dp,
+                                    vertical = if (previewActive) viewportLayout.previewPaddingDp.dp else viewportLayout.linePaddingDp.dp,
+                                ),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
                         ) {
                             Text(
-                                text = formatDuration(line.startTimeMs),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                style = MaterialTheme.typography.labelLarge,
+                                text = lyricText,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .scale(highlightScale),
+                                style = MaterialTheme.typography.titleLarge.copy(
+                                    fontSize = MaterialTheme.typography.titleLarge.fontSize * resolveLyricMainTextScale(lyricFontScale),
+                                    fontWeight = if (emphasizeLine) FontWeight.Bold else FontWeight.Medium,
+                                ),
+                                textAlign = TextAlign.Center,
+                                color = if (previewActive) Color.Transparent else mainTextColor,
                             )
-                            Icon(
-                                Icons.Rounded.PlayArrow,
-                                contentDescription = "跳到这一句",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            if (showTranslation && line.translation.isNotBlank()) {
+                                Text(
+                                    text = line.translation,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    style = MaterialTheme.typography.titleMedium.copy(
+                                        fontSize = MaterialTheme.typography.titleMedium.fontSize *
+                                            resolveLyricTranslationTextScale(lyricFontScale),
+                                    ),
+                                    textAlign = TextAlign.Center,
+                                    color = when {
+                                        previewActive -> Color.Transparent
+                                        currentHighlightActive -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.92f)
+                                        else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.48f)
+                                    },
+                                )
+                            }
+                            if (showRomanized && line.romanized.isNotBlank()) {
+                                Text(
+                                    text = line.romanized,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    style = MaterialTheme.typography.bodyMedium.copy(
+                                        fontSize = MaterialTheme.typography.bodyMedium.fontSize *
+                                            resolveLyricRomanizedTextScale(lyricFontScale),
+                                    ),
+                                    textAlign = TextAlign.Center,
+                                    color = when {
+                                        previewActive -> Color.Transparent
+                                        currentHighlightActive -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.88f)
+                                        else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.46f)
+                                    },
+                                )
+                            }
+                        }
+                    }
+                }
+                item(key = "lyric-bottom-spacer") {
+                    Spacer(
+                        modifier = Modifier.height(
+                            with(density) { bottomSpacerPx.toDp() },
+                        ),
+                    )
+                }
+            }
+
+            if (scrollMode == LyricScrollMode.ManualPreview && previewLine != null) {
+                Row(
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .width(lyricContentWidthDp.dp)
+                        .padding(horizontal = 12.dp)
+                        .clip(RoundedCornerShape(22.dp))
+                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.82f))
+                        .clickable {
+                            when (resolveLyricTapAction(scrollMode, LyricTapTarget.PreviewAnchor)) {
+                                LyricTapAction.ExitToCover -> onExitLyric()
+                                LyricTapAction.SeekPreviewLine -> {
+                                    val resumeState = resolvePreviewSeekResumeState(previewLineIndex)
+                                    scrollMode = LyricScrollMode.AutoFollow
+                                    pendingPreviewSeekTargetLineIndex = previewLineIndex
+                                    previewLineIndex = resumeState.previewLineIndex
+                                    lastAutoCenteredLineIndex = resumeState.lastAutoCenteredLineIndex
+                                    ignoreScrollSignalsUntilMs = SystemClock.elapsedRealtime() + 1_100L
+                                    onSeekToLine(previewLine)
+                                }
+                            }
+                        }
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = formatDuration(previewLine.startTimeMs),
+                        modifier = Modifier.width(54.dp),
+                        color = MaterialTheme.colorScheme.onSurface,
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(horizontal = 10.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Text(
+                            text = previewLine.mainText,
+                            modifier = Modifier.fillMaxWidth(),
+                            color = MaterialTheme.colorScheme.onSurface,
+                            style = MaterialTheme.typography.titleLarge.copy(
+                                fontSize = MaterialTheme.typography.titleLarge.fontSize *
+                                    resolvePreviewAnchorMainTextScale(lyricFontScale),
+                                fontWeight = FontWeight.Bold,
+                            ),
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            textAlign = TextAlign.Center,
+                        )
+                        if (showTranslation && previewLine.translation.isNotBlank()) {
+                            Text(
+                                text = previewLine.translation,
+                                modifier = Modifier.fillMaxWidth(),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    fontSize = MaterialTheme.typography.titleMedium.fontSize *
+                                        resolveLyricTranslationTextScale(lyricFontScale),
+                                ),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                textAlign = TextAlign.Center,
                             )
                         }
                     }
-                    Text(
-                        text = lyricText,
-                        modifier = Modifier.fillMaxWidth(),
-                        style = MaterialTheme.typography.titleLarge.copy(
-                            fontSize = MaterialTheme.typography.titleLarge.fontSize * lyricFontScale,
-                            fontWeight = if (emphasizeLine) FontWeight.SemiBold else FontWeight.Normal,
-                        ),
-                        textAlign = TextAlign.Center,
-                        color = mainTextColor,
+                    Icon(
+                        Icons.Rounded.PlayArrow,
+                        contentDescription = "跳到这一句",
+                        modifier = Modifier.size(34.dp),
+                        tint = MaterialTheme.colorScheme.onSurface,
                     )
-                    if (showTranslation && line.translation.isNotBlank()) {
-                        Text(
-                            text = line.translation,
-                            modifier = Modifier.fillMaxWidth(),
-                            style = MaterialTheme.typography.titleMedium.copy(
-                                fontSize = MaterialTheme.typography.titleMedium.fontSize * lyricFontScale * 0.82f,
-                            ),
-                            textAlign = TextAlign.Center,
-                            color = when {
-                                previewActive -> MaterialTheme.colorScheme.onSurfaceVariant
-                                currentActive && !manualPreviewMode -> MaterialTheme.colorScheme.onSurfaceVariant
-                                else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.42f)
-                            },
-                        )
-                    }
-                    if (showRomanized && line.romanized.isNotBlank()) {
-                        Text(
-                            text = line.romanized,
-                            modifier = Modifier.fillMaxWidth(),
-                            style = MaterialTheme.typography.bodyMedium.copy(
-                                fontSize = MaterialTheme.typography.bodyMedium.fontSize * lyricFontScale * 0.78f,
-                            ),
-                            textAlign = TextAlign.Center,
-                            color = when {
-                                previewActive -> MaterialTheme.colorScheme.onSurfaceVariant
-                                currentActive && !manualPreviewMode -> MaterialTheme.colorScheme.onSurfaceVariant
-                                else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
-                            },
-                        )
-                    }
                 }
-            }
-            item(key = "lyric-bottom-spacer") {
-                Spacer(
-                    modifier = Modifier.height(
-                        with(density) { bottomSpacerPx.toDp() },
-                    ),
-                )
             }
         }
     }
@@ -1048,10 +1357,79 @@ private fun formatCommentTime(timestampMs: Long): String {
     }.getOrDefault("")
 }
 
-private fun List<LyricLineUi>.indexOfCurrentLine(positionMs: Long): Int {
+internal fun List<LyricLineUi>.indexOfCurrentLine(positionMs: Long): Int {
     if (isEmpty()) return -1
-    val candidate = indexOfLast { it.startTimeMs <= positionMs }
-    return if (candidate >= 0) candidate else 0
+    val boundedCandidate = indexOfLast { line ->
+        line.startTimeMs <= positionMs &&
+            (
+                line.endTimeMs <= line.startTimeMs ||
+                    positionMs < line.endTimeMs
+            )
+    }
+    if (boundedCandidate >= 0) return boundedCandidate
+    val trailingCandidate = indexOfLast { it.startTimeMs <= positionMs }
+    return if (trailingCandidate >= 0) trailingCandidate else 0
+}
+
+internal fun hasWordLevelLyricAtPosition(
+    lyrics: List<LyricLineUi>,
+    positionMs: Long,
+): Boolean {
+    val currentLineIndex = lyrics.indexOfCurrentLine(positionMs)
+    return currentLineIndex in lyrics.indices &&
+        resolveLyricHighlightMode(lyrics[currentLineIndex]) == LyricHighlightMode.Word
+}
+
+internal fun hasWordLevelLyric(
+    lyrics: List<LyricLineUi>,
+): Boolean {
+    return lyrics.any { line -> usesWordLevelLyric(line) }
+}
+
+internal const val DISC_ROTATION_CYCLE_MS = 18_000
+internal const val LYRIC_AUTO_CENTER_ANIMATION_MS = 260
+
+internal fun shouldRunDiscRotation(
+    isPlaying: Boolean,
+    isBuffering: Boolean,
+): Boolean {
+    return isPlaying && !isBuffering
+}
+
+internal fun normalizeDiscRotation(
+    degrees: Float,
+): Float {
+    return ((degrees % 360f) + 360f) % 360f
+}
+
+internal fun resolveLyricMainTextScale(
+    lyricFontScale: Float,
+): Float {
+    return lyricFontScale * 1.32f
+}
+
+internal fun resolvePreviewAnchorMainTextScale(
+    lyricFontScale: Float,
+): Float {
+    return resolveLyricMainTextScale(lyricFontScale)
+}
+
+internal fun resolvePlayerStageToProgressGapDp(
+    lyricMode: Boolean,
+): Float {
+    return if (lyricMode) 6f else 10f
+}
+
+internal fun resolveLyricTranslationTextScale(
+    lyricFontScale: Float,
+): Float {
+    return lyricFontScale * 1.08f
+}
+
+internal fun resolveLyricRomanizedTextScale(
+    lyricFontScale: Float,
+): Float {
+    return lyricFontScale * 0.98f
 }
 
 internal data class CenteredLyricCandidate(
@@ -1059,10 +1437,105 @@ internal data class CenteredLyricCandidate(
     val centerY: Float,
 )
 
+internal data class PreviewSeekResumeState(
+    val previewLineIndex: Int,
+    val lastAutoCenteredLineIndex: Int,
+)
+
+internal enum class LyricScrollMode {
+    AutoFollow,
+    ManualPreview,
+}
+
+internal enum class LyricTapTarget {
+    Background,
+    Line,
+    PreviewAnchor,
+}
+
+internal enum class LyricTapAction {
+    ExitToCover,
+    SeekPreviewLine,
+}
+
+internal enum class LyricHighlightMode {
+    Word,
+    Sentence,
+}
+
+internal fun resolveLyricTapAction(
+    mode: LyricScrollMode,
+    tapTarget: LyricTapTarget,
+): LyricTapAction {
+    return when {
+        mode == LyricScrollMode.ManualPreview && tapTarget == LyricTapTarget.PreviewAnchor -> LyricTapAction.SeekPreviewLine
+        else -> LyricTapAction.ExitToCover
+    }
+}
+
+internal fun resolvePreviewSeekResumeState(
+    previewLineIndex: Int,
+): PreviewSeekResumeState {
+    return PreviewSeekResumeState(
+        previewLineIndex = previewLineIndex,
+        lastAutoCenteredLineIndex = previewLineIndex,
+    )
+}
+
+internal fun shouldEnterManualPreview(
+    isScrollInProgress: Boolean,
+    autoScrolling: Boolean,
+    userScrollActive: Boolean,
+    ignoreAutoScrollSignals: Boolean,
+    centeredIndex: Int?,
+    currentLineIndex: Int,
+): Boolean {
+    return isScrollInProgress &&
+        !autoScrolling &&
+        userScrollActive &&
+        !ignoreAutoScrollSignals &&
+        centeredIndex != null &&
+        centeredIndex != currentLineIndex
+}
+
+internal fun shouldAutoCenterLyricLine(
+    mode: LyricScrollMode,
+    currentLineIndex: Int,
+    lastAutoCenteredLineIndex: Int,
+): Boolean {
+    return mode == LyricScrollMode.AutoFollow &&
+        currentLineIndex >= 0 &&
+        currentLineIndex != lastAutoCenteredLineIndex
+}
+
+internal fun shouldBlockAutoCenterForPendingPreviewSeek(
+    pendingPreviewSeekTargetLineIndex: Int,
+    currentLineIndex: Int,
+): Boolean {
+    return pendingPreviewSeekTargetLineIndex >= 0 &&
+        currentLineIndex >= 0 &&
+        pendingPreviewSeekTargetLineIndex != currentLineIndex
+}
+
+internal fun shouldUpdateManualPreviewAnchor(
+    mode: LyricScrollMode,
+    isScrollInProgress: Boolean,
+    userScrollActive: Boolean,
+    centeredIndex: Int?,
+): Boolean {
+    return mode == LyricScrollMode.ManualPreview &&
+        isScrollInProgress &&
+        userScrollActive &&
+        centeredIndex != null
+}
+
 internal data class CoverStageLayout(
     val discSizeDp: Float,
+    val compositionSizeDp: Float,
+    val stageTopOffsetDp: Float,
     val visualZoneHeightDp: Float,
-    val visualOffsetYDp: Float,
+    val visualTopInsetDp: Float,
+    val infoBottomPaddingDp: Float,
     val artworkSizeDp: Float,
     val toneArmSlotWidthDp: Float,
     val toneArmSlotHeightDp: Float,
@@ -1084,27 +1557,56 @@ internal fun resolveCoverStageLayout(
     maxWidthDp: Float,
     maxHeightDp: Float,
 ): CoverStageLayout {
-    val discCap = minOf(584f, maxWidthDp * 1.34f)
+    val discFloor = minOf(maxWidthDp * 0.96f, 384f)
     val discSize = minOf(
-        maxWidthDp * 1.28f,
-        (maxHeightDp - 8f).coerceAtLeast(0f) * 1.02f,
-        discCap,
+        maxWidthDp * 1.12f,
+        maxHeightDp * 0.72f,
+        560f,
+    ).coerceAtLeast(discFloor).roundToInt().toFloat()
+    val toneArmSlotWidth = (discSize * 0.54f).roundToInt().toFloat()
+    val toneArmSlotHeight = (discSize * 0.48f).roundToInt().toFloat()
+    val compositionSize = max(
+        discSize + 10f,
+        toneArmSlotWidth + 54f,
     ).roundToInt().toFloat()
-    val visualOffset = (maxHeightDp * 0.085f).coerceIn(28f, 48f)
-    val visualZoneHeight = maxOf(
-        discSize + visualOffset + 12f,
-        maxHeightDp * 0.64f,
-    ).roundToInt().toFloat()
+    val stageTopOffset = (maxHeightDp * 0.012f).coerceIn(4f, 12f).roundToInt().toFloat()
+    val visualTopInset = (maxHeightDp * 0.15f).coerceIn(42f, 148f).roundToInt().toFloat()
+    val infoBottomPadding = (maxHeightDp * 0.02f).coerceIn(6f, 16f).roundToInt().toFloat()
+    val visualZoneHeight = (compositionSize + visualTopInset).roundToInt().toFloat()
     return CoverStageLayout(
         discSizeDp = discSize,
+        compositionSizeDp = compositionSize,
+        stageTopOffsetDp = stageTopOffset,
         visualZoneHeightDp = visualZoneHeight,
-        visualOffsetYDp = visualOffset.roundToInt().toFloat(),
-        artworkSizeDp = (discSize * 0.66f).roundToInt().toFloat(),
-        toneArmSlotWidthDp = (discSize * 0.56f).roundToInt().toFloat(),
-        toneArmSlotHeightDp = (discSize * 0.48f).roundToInt().toFloat(),
-        toneArmOffsetXDp = -(discSize * 0.028f).roundToInt().toFloat(),
-        toneArmOffsetYDp = -(discSize * 0.018f).roundToInt().toFloat(),
+        visualTopInsetDp = visualTopInset,
+        infoBottomPaddingDp = infoBottomPadding,
+        artworkSizeDp = (discSize * 0.69f).roundToInt().toFloat(),
+        toneArmSlotWidthDp = toneArmSlotWidth,
+        toneArmSlotHeightDp = toneArmSlotHeight,
+        toneArmOffsetXDp = -(discSize * 0.024f).roundToInt().toFloat(),
+        toneArmOffsetYDp = (discSize * 0.014f).roundToInt().toFloat(),
     )
+}
+
+internal fun resolvePlayerStageHeightDp(
+    viewportHeightDp: Float,
+    lyricMode: Boolean,
+): Float {
+    val reservedForControls = (if (lyricMode) 264f else 236f) + resolvePlayerBottomSafeGapDp(viewportHeightDp)
+    val minHeight = if (lyricMode) 360f else 380f
+    return (viewportHeightDp - reservedForControls)
+        .coerceAtLeast(minHeight.coerceAtMost(viewportHeightDp))
+        .roundToInt()
+        .toFloat()
+}
+
+internal fun resolvePlayerBottomSafeGapDp(
+    viewportHeightDp: Float,
+): Float {
+    return (viewportHeightDp * 0.035f)
+        .coerceIn(14f, 34f)
+        .roundToInt()
+        .toFloat()
 }
 
 internal fun resolveLyricViewportLayout(
@@ -1113,22 +1615,36 @@ internal fun resolveLyricViewportLayout(
     return LyricViewportLayout(
         topPaddingDp = 0f,
         bottomPaddingDp = 0f,
-        lineSpacingDp = 10f,
+        lineSpacingDp = 22f,
         horizontalPaddingDp = if (viewportHeightDp >= 560f) 6f else 4f,
-        linePaddingDp = 2f,
-        previewPaddingDp = 8f,
+        linePaddingDp = 4f,
+        previewPaddingDp = 10f,
         edgeMinPaddingDp = 20f,
     )
+}
+
+internal fun resolveLyricContentWidthDp(
+    viewportWidthDp: Float,
+): Float {
+    return minOf(680f, viewportWidthDp * 0.92f)
+}
+
+internal fun resolveLyricViewportHeightPx(
+    viewportStart: Int,
+    viewportEnd: Int,
+    fallbackHeightPx: Int,
+): Int {
+    val measuredHeight = viewportEnd - viewportStart
+    return if (measuredHeight > 0) measuredHeight else fallbackHeightPx
 }
 
 internal fun resolveLyricEdgeSpacerPx(
     viewportHeightPx: Int,
     lineHeightPx: Int,
     minimumPaddingPx: Int,
-    betweenItemSpacingPx: Int,
 ): Int {
     if (viewportHeightPx <= 0) return minimumPaddingPx
-    val centeredPadding = ((viewportHeightPx - lineHeightPx) / 2f).roundToInt() - betweenItemSpacingPx
+    val centeredPadding = ((viewportHeightPx - lineHeightPx) / 2f).roundToInt()
     return centeredPadding.coerceAtLeast(minimumPaddingPx)
 }
 
@@ -1140,20 +1656,20 @@ internal fun estimateLyricLineHeightPx(
     density: Density,
 ): Int {
     return with(density) {
-        val mainHeight = (46.dp * lyricFontScale).roundToPx()
+        val mainHeight = (68.dp * lyricFontScale).roundToPx()
         val translationHeight = if (showTranslation && line.translation.isNotBlank()) {
-            (28.dp * lyricFontScale).roundToPx()
+            (42.dp * lyricFontScale).roundToPx()
         } else {
             0
         }
         val romanizedHeight = if (showRomanized && line.romanized.isNotBlank()) {
-            (24.dp * lyricFontScale).roundToPx()
+            (36.dp * lyricFontScale).roundToPx()
         } else {
             0
         }
         val extraSpacing = when {
-            translationHeight > 0 && romanizedHeight > 0 -> 16.dp.roundToPx()
-            translationHeight > 0 || romanizedHeight > 0 -> 10.dp.roundToPx()
+            translationHeight > 0 && romanizedHeight > 0 -> 14.dp.roundToPx()
+            translationHeight > 0 || romanizedHeight > 0 -> 8.dp.roundToPx()
             else -> 4.dp.roundToPx()
         }
         mainHeight + translationHeight + romanizedHeight + extraSpacing
@@ -1173,7 +1689,7 @@ internal fun resolveLyricScrollAdjustmentPx(
     viewportStart: Int,
     viewportEnd: Int,
 ): Float {
-    return -calculateLyricCenterDelta(
+    return calculateLyricCenterDelta(
         itemCenterY = itemCenterY,
         viewportStart = viewportStart,
         viewportEnd = viewportEnd,
@@ -1200,6 +1716,46 @@ internal fun resolveLyricWordProgress(
     return ((positionMs - word.startTimeMs) / durationMs).coerceIn(0f, 1f)
 }
 
+internal fun resolveLyricLineProgress(
+    line: LyricLineUi,
+    positionMs: Long,
+): Float {
+    if (positionMs <= line.startTimeMs) return 0f
+    if (line.endTimeMs <= line.startTimeMs) return if (positionMs > line.startTimeMs) 1f else 0f
+    val durationMs = (line.endTimeMs - line.startTimeMs).toFloat()
+    return ((positionMs - line.startTimeMs) / durationMs).coerceIn(0f, 1f)
+}
+
+internal fun usesWordLevelLyric(
+    line: LyricLineUi,
+): Boolean {
+    return resolveLyricHighlightMode(line) == LyricHighlightMode.Word
+}
+
+internal fun resolveLyricHighlightMode(
+    line: LyricLineUi,
+): LyricHighlightMode {
+    return if (hasDistinctWordTimeline(line)) {
+        LyricHighlightMode.Word
+    } else {
+        LyricHighlightMode.Sentence
+    }
+}
+
+internal fun hasDistinctWordTimeline(
+    line: LyricLineUi,
+): Boolean {
+    val timedWords = line.words.filter { word ->
+        word.text.any { char -> !char.isWhitespace() } &&
+            word.endTimeMs > word.startTimeMs
+    }
+    if (timedWords.size <= 1) return false
+    return timedWords
+        .map { word -> word.startTimeMs to word.endTimeMs }
+        .distinct()
+        .size > 1
+}
+
 internal fun resolveLyricGlyphProgress(
     glyphIndex: Int,
     glyphCount: Int,
@@ -1209,14 +1765,17 @@ internal fun resolveLyricGlyphProgress(
     return (wordProgress.coerceIn(0f, 1f) * glyphCount - glyphIndex).coerceIn(0f, 1f)
 }
 
-private fun buildLyricAnnotatedText(
+internal fun buildLyricAnnotatedText(
     line: LyricLineUi,
     currentPositionMs: Long,
     wordHighlightEnabled: Boolean,
     emphasizedColor: Color,
     upcomingColor: Color,
 ): AnnotatedString {
-    if (!wordHighlightEnabled || line.words.isEmpty()) {
+    if (!wordHighlightEnabled) {
+        return AnnotatedString(line.mainText)
+    }
+    if (resolveLyricHighlightMode(line) != LyricHighlightMode.Word) {
         return AnnotatedString(line.mainText)
     }
     return buildAnnotatedString {
@@ -1251,7 +1810,7 @@ private fun buildLyricAnnotatedText(
                 pushStyle(
                     SpanStyle(
                         color = glyphColor,
-                        fontWeight = if (glyphProgress > 0f) FontWeight.SemiBold else FontWeight.Normal,
+                        fontWeight = if (glyphProgress > 0f) FontWeight.Bold else FontWeight.Normal,
                     ),
                 )
                 append(charText)

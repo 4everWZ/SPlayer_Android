@@ -22,11 +22,7 @@
     <!-- 搜索框遮罩 -->
     <Teleport to="body">
       <Transition name="fade" mode="out-in">
-        <div
-          v-show="statusStore.searchFocus"
-          class="search-mask"
-          @click.stop="closeSearchFocus"
-        />
+        <div v-show="statusStore.searchFocus" class="search-mask" @click.stop="closeSearchFocus" />
       </Transition>
     </Teleport>
     <!-- 默认内容 -->

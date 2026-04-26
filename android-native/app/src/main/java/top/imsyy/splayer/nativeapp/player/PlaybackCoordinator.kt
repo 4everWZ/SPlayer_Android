@@ -20,6 +20,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import top.imsyy.splayer.nativeapp.data.local.AppSettingsStore
@@ -40,6 +41,12 @@ data class PlaybackUiState(
     val playMode: PlayMode = PlayMode.SEQUENCE,
     val currentSource: String? = null,
     val errorMessage: String? = null,
+)
+
+data class MiniPlayerChromeState(
+    val currentTrack: TrackItem? = null,
+    val isPlaying: Boolean = false,
+    val queueCount: Int = 0,
 )
 
 internal fun seedPendingPlaybackState(
@@ -69,10 +76,32 @@ internal fun shouldDispatchProgressUpdate(
 
 internal fun shouldRunProgressLoop(
     hasActiveSubscribers: Boolean,
+    playerScreenActive: Boolean,
     isPlaying: Boolean,
     isBuffering: Boolean,
 ): Boolean {
-    return hasActiveSubscribers && isPlaying && !isBuffering
+    return hasActiveSubscribers && playerScreenActive && isPlaying && !isBuffering
+}
+
+internal fun resolveProgressLoopIntervalMs(
+    playerScreenActive: Boolean,
+    lyricScreenActive: Boolean,
+    wordLevelLyricActive: Boolean,
+): Long {
+    return when {
+        playerScreenActive && lyricScreenActive && wordLevelLyricActive -> 160L
+        playerScreenActive && lyricScreenActive -> 900L
+        playerScreenActive -> 900L
+        else -> 2_000L
+    }
+}
+
+internal fun toMiniPlayerChromeState(state: PlaybackUiState): MiniPlayerChromeState {
+    return MiniPlayerChromeState(
+        currentTrack = state.currentTrack,
+        isPlaying = state.isPlaying,
+        queueCount = state.queue.size,
+    )
 }
 
 internal fun shouldRunStallWatchdog(
@@ -89,6 +118,32 @@ internal fun shouldTriggerStallRecovery(
     stallTimeoutMs: Long,
 ): Boolean {
     return isBuffering && noProgressDurationMs >= stallTimeoutMs
+}
+
+internal fun resolvePlaybackEndTargetIndex(
+    queueSize: Int,
+    currentIndex: Int,
+    playMode: PlayMode,
+    shuffleCandidateIndex: Int? = null,
+): Int? {
+    if (queueSize <= 0) return null
+    val safeCurrentIndex = currentIndex.coerceIn(0, queueSize - 1)
+    return when (playMode) {
+        PlayMode.SINGLE_LOOP -> safeCurrentIndex
+        PlayMode.SHUFFLE -> {
+            if (queueSize == 1) {
+                safeCurrentIndex
+            } else {
+                shuffleCandidateIndex
+                    ?.takeIf { it in 0 until queueSize && it != safeCurrentIndex }
+                    ?: (0 until queueSize).firstOrNull { it != safeCurrentIndex }
+            }
+        }
+        PlayMode.SEQUENCE,
+        PlayMode.LIST_LOOP,
+        PlayMode.HEART,
+        -> (safeCurrentIndex + 1) % queueSize
+    }
 }
 
 @Singleton
@@ -124,6 +179,10 @@ class PlaybackCoordinator @Inject constructor(
     private var lastPublishedPositionMs = 0L
     private var lastPublishedDurationMs = 0L
     private var retryCount = 0
+    private var playbackEndJob: Job? = null
+    private var playerScreenProgressActive = false
+    private var lyricScreenProgressActive = false
+    private var wordLevelLyricProgressActive = false
     private val stallTimeoutMs = 9_000L
 
     init {
@@ -143,21 +202,28 @@ class PlaybackCoordinator @Inject constructor(
 
                 override fun onPlaybackStateChanged(playbackState: Int) {
                     val isBuffering = playbackState == Player.STATE_BUFFERING
-                _uiState.value = _uiState.value.copy(
-                    isBuffering = isBuffering,
-                    durationMs = player.duration.takeIf { it > 0 } ?: _uiState.value.durationMs,
-                )
-                if (shouldRunStallWatchdog(
-                        hasTrack = _uiState.value.currentTrack != null,
+                    _uiState.value = _uiState.value.copy(
                         isBuffering = isBuffering,
-                        playWhenReady = player.playWhenReady,
+                        durationMs = player.duration.takeIf { it > 0 } ?: _uiState.value.durationMs,
                     )
-                ) {
-                    stopProgressUpdates()
-                    startStallWatchdog()
-                } else {
-                    stopStallWatchdog()
-                    syncProgressSnapshot(force = true)
+                    if (playbackState == Player.STATE_ENDED) {
+                        stopProgressUpdates()
+                        stopStallWatchdog()
+                        syncProgressSnapshot(force = true)
+                        handlePlaybackEnded()
+                        return
+                    }
+                    if (shouldRunStallWatchdog(
+                            hasTrack = _uiState.value.currentTrack != null,
+                            isBuffering = isBuffering,
+                            playWhenReady = player.playWhenReady,
+                        )
+                    ) {
+                        stopProgressUpdates()
+                        startStallWatchdog()
+                    } else {
+                        stopStallWatchdog()
+                        syncProgressSnapshot(force = true)
                         if (player.isPlaying) {
                             startProgressUpdates()
                         }
@@ -186,6 +252,7 @@ class PlaybackCoordinator @Inject constructor(
             _uiState.subscriptionCount.collect { count ->
                 val shouldRun = shouldRunProgressLoop(
                     hasActiveSubscribers = count > 0,
+                    playerScreenActive = playerScreenProgressActive,
                     isPlaying = player.isPlaying,
                     isBuffering = player.playbackState == Player.STATE_BUFFERING,
                 )
@@ -203,9 +270,45 @@ class PlaybackCoordinator @Inject constructor(
         sessionServiceAttached = true
     }
 
+    fun detachSessionService() {
+        sessionServiceAttached = false
+    }
+
     fun ensureServiceRunning() {
         if (!sessionServiceAttached) {
             context.startForegroundService(Intent(context, SPlayerPlaybackService::class.java))
+        }
+    }
+
+    fun setProgressCadence(
+        playerScreenActive: Boolean,
+        lyricScreenActive: Boolean,
+        wordLevelLyricActive: Boolean,
+    ) {
+        if (
+            playerScreenProgressActive == playerScreenActive &&
+            lyricScreenProgressActive == lyricScreenActive &&
+            wordLevelLyricProgressActive == wordLevelLyricActive
+        ) {
+            return
+        }
+        playerScreenProgressActive = playerScreenActive
+        lyricScreenProgressActive = lyricScreenActive
+        wordLevelLyricProgressActive = wordLevelLyricActive
+        appScope.launch(Dispatchers.Main.immediate) {
+            if (shouldRunProgressLoop(
+                    hasActiveSubscribers = _uiState.subscriptionCount.value > 0,
+                    playerScreenActive = playerScreenProgressActive,
+                    isPlaying = player.isPlaying,
+                    isBuffering = player.playbackState == Player.STATE_BUFFERING,
+                )
+            ) {
+                stopProgressUpdates()
+                syncProgressSnapshot(force = true)
+                startProgressUpdates()
+            } else {
+                stopProgressUpdates()
+            }
         }
     }
 
@@ -227,7 +330,12 @@ class PlaybackCoordinator @Inject constructor(
         )
         trackSourceResolver.clearFailures(track)
         val source = trackSourceResolver.resolve(track)
-        playResolvedTrack(track, source, resolvedQueueIndex)
+        playResolvedTrack(
+            track = track,
+            source = source,
+            queueIndex = resolvedQueueIndex,
+            startPlayback = appSettingsStore.settings.value.autoPlay,
+        )
     }
 
     fun togglePlayback() {
@@ -293,7 +401,75 @@ class PlaybackCoordinator @Inject constructor(
         appScope.launch { playTrack(queue[nextIndex], nextIndex) }
     }
 
-    private suspend fun playResolvedTrack(track: TrackItem, source: TrackSource, queueIndex: Int) {
+    private fun handlePlaybackEnded() {
+        if (playbackEndJob?.isActive == true) return
+        playbackEndJob = appScope.launch {
+            val state = _uiState.value
+            val queue = state.queue
+            val targetIndex = resolvePlaybackEndTargetIndex(
+                queueSize = queue.size,
+                currentIndex = state.currentIndex,
+                playMode = state.playMode,
+                shuffleCandidateIndex = if (state.playMode == PlayMode.SHUFFLE) {
+                    (queue.indices - state.currentIndex).randomOrNull()
+                } else {
+                    null
+                },
+            ) ?: return@launch
+            val targetTrack = queue.getOrNull(targetIndex) ?: return@launch
+            val currentTrack = state.currentTrack
+            if (targetTrack.id == currentTrack?.id && targetIndex == state.currentIndex) {
+                withPlayer {
+                    seekTo(0L)
+                    playWhenReady = true
+                    play()
+                }
+                lastStablePositionMs = 0L
+                lastPositionUpdateElapsed = SystemClock.elapsedRealtime()
+                lastPublishedPositionMs = 0L
+                _uiState.value = _uiState.value.copy(
+                    currentIndex = targetIndex,
+                    positionMs = 0L,
+                    isBuffering = false,
+                    errorMessage = null,
+                )
+                startProgressUpdates()
+                return@launch
+            }
+            playTrackAfterEnded(targetTrack, targetIndex)
+        }.also { job ->
+            job.invokeOnCompletion {
+                if (playbackEndJob === job) {
+                    playbackEndJob = null
+                }
+            }
+        }
+    }
+
+    private suspend fun playTrackAfterEnded(track: TrackItem, queueIndex: Int) {
+        ensureServiceRunning()
+        retryCount = 0
+        _uiState.value = seedPendingPlaybackState(
+            previousState = _uiState.value,
+            track = track,
+            queueIndex = queueIndex,
+        )
+        trackSourceResolver.clearFailures(track)
+        val source = trackSourceResolver.resolve(track)
+        playResolvedTrack(
+            track = track,
+            source = source,
+            queueIndex = queueIndex,
+            startPlayback = true,
+        )
+    }
+
+    private suspend fun playResolvedTrack(
+        track: TrackItem,
+        source: TrackSource,
+        queueIndex: Int,
+        startPlayback: Boolean,
+    ) {
         val mediaItem = MediaItem.Builder()
             .setMediaId(track.id.toString())
             .setUri(source.url)
@@ -303,7 +479,7 @@ class PlaybackCoordinator @Inject constructor(
         withPlayer {
             setMediaItem(mediaItem)
             prepare()
-            if (appSettingsStore.settings.value.autoPlay) {
+            if (startPlayback) {
                 playWhenReady = true
                 play()
             }
@@ -329,6 +505,7 @@ class PlaybackCoordinator @Inject constructor(
             progressJob?.isActive == true ||
             !shouldRunProgressLoop(
                 hasActiveSubscribers = _uiState.subscriptionCount.value > 0,
+                playerScreenActive = playerScreenProgressActive,
                 isPlaying = player.isPlaying,
                 isBuffering = player.playbackState == Player.STATE_BUFFERING,
             )
@@ -336,11 +513,18 @@ class PlaybackCoordinator @Inject constructor(
             return
         }
         progressJob = appScope.launch(Dispatchers.Main.immediate) {
-            while (true) {
-                delay(1_200)
+            while (isActive) {
+                delay(
+                    resolveProgressLoopIntervalMs(
+                        playerScreenActive = playerScreenProgressActive,
+                        lyricScreenActive = lyricScreenProgressActive,
+                        wordLevelLyricActive = wordLevelLyricProgressActive,
+                    ),
+                )
                 if (
                     !shouldRunProgressLoop(
                         hasActiveSubscribers = _uiState.subscriptionCount.value > 0,
+                        playerScreenActive = playerScreenProgressActive,
                         isPlaying = player.isPlaying,
                         isBuffering = player.playbackState == Player.STATE_BUFFERING,
                     )
@@ -374,12 +558,12 @@ class PlaybackCoordinator @Inject constructor(
             return
         }
         stallJob = appScope.launch {
-            while (true) {
+            while (isActive) {
                 delay(1_500)
                 if (!shouldRunStallWatchdog(
                         hasTrack = _uiState.value.currentTrack != null,
                         isBuffering = _uiState.value.isBuffering,
-                        playWhenReady = player.playWhenReady,
+                        playWhenReady = withPlayer { playWhenReady },
                     )
                 ) {
                     break
@@ -423,7 +607,12 @@ class PlaybackCoordinator @Inject constructor(
         runCatching {
             val nextSource = trackSourceResolver.resolve(currentTrack)
             val queueIndex = _uiState.value.currentIndex.coerceAtLeast(0)
-            playResolvedTrack(currentTrack, nextSource, queueIndex)
+            playResolvedTrack(
+                track = currentTrack,
+                source = nextSource,
+                queueIndex = queueIndex,
+                startPlayback = appSettingsStore.settings.value.autoPlay,
+            )
             if (resumePosition > 0L) {
                 seekTo(resumePosition)
             }

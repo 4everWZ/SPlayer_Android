@@ -20,9 +20,13 @@ jobs:
           java-version: 21
           cache: gradle
 
+      - name: Make gradle wrapper executable
+        working-directory: android-native
+        run: chmod +x ./gradlew
+
       - name: Build native debug APK
         working-directory: android-native
-        run: ./gradlew assembleDebug
+        run: ./gradlew testDebugUnitTest assembleDebug --no-daemon --console=plain
 
       - name: Upload native APK
         uses: actions/upload-artifact@v4

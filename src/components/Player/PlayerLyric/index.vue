@@ -2,12 +2,7 @@
   <div class="player-lyric">
     <!-- 歌词内容 -->
     <AMLyric v-if="settingStore.useAMLyrics" :currentTime="playSeek" :playing="lyricPlaying" />
-    <DefaultLyric
-      v-else
-      :compact="props.compact"
-      :currentTime="playSeek"
-      :playing="lyricPlaying"
-    />
+    <DefaultLyric v-else :compact="props.compact" :currentTime="playSeek" :playing="lyricPlaying" />
     <!-- 歌词菜单 -->
     <n-flex :class="['lyric-menu', { show: statusStore.playerMetaShow }]" justify="center" vertical>
       <div
@@ -138,7 +133,7 @@ const syncPlaySeek = () => {
 };
 
 const { pause: pauseSeek, resume: resumeSeek } = useRafFn(syncPlaySeek, {
-  fpsLimit: isCapacitor ? (props.compact ? 18 : 20) : (props.compact ? 24 : undefined),
+  fpsLimit: isCapacitor ? (props.compact ? 18 : 20) : props.compact ? 24 : undefined,
 });
 
 /**

@@ -84,9 +84,17 @@ fun buildMyMusicPanel(content: MyMusicHomeUi): MyMusicPanelUi {
         likedSongCount = content.likedSongCount,
         likedPlaylist = content.likedPlaylist,
         recentTracks = content.recentTracks,
+        recentPlaylists = content.recentPlaylists.ifEmpty {
+            buildList {
+                content.likedPlaylist?.let(::add)
+                addAll(content.createdPlaylists)
+                addAll(content.collectedPlaylists)
+            }.distinctBy { playlist -> playlist.id }.take(8)
+        },
         createdPlaylists = content.createdPlaylists,
         collectedPlaylists = content.collectedPlaylists,
         albums = content.albums,
+        listeningRanks = content.listeningRanks,
     )
 }
 
