@@ -57,6 +57,7 @@ data class RadioCategoryUi(
 
 data class DiscoveryHomeUi(
     val recommendedPlaylists: List<PlaylistItem> = emptyList(),
+    val dailySongs: List<TrackItem> = emptyList(),
     val newSongs: List<TrackItem> = emptyList(),
     val topArtists: List<ArtistItem> = emptyList(),
     val newAlbums: List<AlbumItem> = emptyList(),

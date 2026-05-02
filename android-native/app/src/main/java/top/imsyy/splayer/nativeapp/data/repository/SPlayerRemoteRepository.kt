@@ -223,13 +223,24 @@ class SPlayerRemoteRepository @Inject constructor(
         return supervisorScope {
             val timestampParam = if (forceRefresh) mapOf("timestamp" to now()) else emptyMap()
             val playlistResponse = async { getNetease("personalized", mapOf("limit" to "12") + timestampParam) }
+            val dailySongResponse = async {
+                runCatching { getNetease("recommend/songs", timestampParam) }.getOrNull()
+            }
             val songResponse = async { getNetease("top/song", mapOf("type" to "0") + timestampParam) }
             val artistResponse = async { getNetease("top/artists", mapOf("limit" to "12") + timestampParam) }
             val albumResponse = async { getNetease("album/new", timestampParam) }
             val toplistResponse = async { getNetease("toplist/detail", timestampParam) }
+            val newSongs = songResponse.await().array("data").mapNotNull { it.toTrackItem() }
+            val dailySongs = dailySongResponse.await()
+                ?.obj("data")
+                ?.array("dailySongs")
+                ?.mapNotNull { it.toTrackItem() }
+                .orEmpty()
+                .ifEmpty { newSongs }
             DiscoveryHomeUi(
                 recommendedPlaylists = playlistResponse.await().array("result").mapNotNull { it.toPlaylistItem() },
-                newSongs = songResponse.await().array("data").mapNotNull { it.toTrackItem() },
+                dailySongs = dailySongs,
+                newSongs = newSongs,
                 topArtists = artistResponse.await().array("artists").mapNotNull { it.toArtistItem() },
                 newAlbums = albumResponse.await().array("albums").mapNotNull { it.toAlbumItem() },
                 topPlaylists = toplistResponse.await().array("list").mapNotNull { it.toPlaylistItem() }.take(6),
@@ -1574,7 +1585,12 @@ private fun JsonObject.toUserAccount(profile: JsonObject = this): UserAccountUi?
         userId = userId,
         nickname = profile.string("nickname").ifBlank { string("nickname") },
         avatarUrl = profile.string("avatarUrl").ifBlank { string("avatarUrl") },
-        backgroundUrl = profile.string("backgroundUrl").ifBlank { string("backgroundUrl") },
+        backgroundUrl = profile.string("backgroundUrl")
+            .ifBlank { profile.string("backgroundImageUrl") }
+            .ifBlank { profile.string("profileBackgroundUrl") }
+            .ifBlank { string("backgroundUrl") }
+            .ifBlank { string("backgroundImageUrl") }
+            .ifBlank { string("profileBackgroundUrl") },
         signature = profile.string("signature").ifBlank { string("signature") },
         level = int("level").takeIf { it > 0 } ?: profile.int("level"),
         followCount = profile.int("follows"),

@@ -61,6 +61,22 @@ class NativeMusicContractTest {
     }
 
     @Test
+    fun `buildRecommendFeedUi uses daily recommendations for taste section before new songs`() {
+        val feed = buildRecommendFeedUi(
+            discovery = sampleDiscoveryHome().copy(
+                dailySongs = listOf(
+                    sampleTrack(id = 41, name = "日推甲"),
+                    sampleTrack(id = 42, name = "日推乙"),
+                ),
+            ),
+            recentTracks = emptyList(),
+        )
+
+        assertEquals(listOf("日推甲", "日推乙"), feed.guessTracks.map { it.name })
+        assertEquals(listOf("新歌甲", "新歌乙", "新歌丙"), feed.newSongs.map { it.name })
+    }
+
+    @Test
     fun `buildMyMusicPanel keeps recent tab focused on albums playlists and listening rank`() {
         val user = UserAccountUi(
             userId = 7L,

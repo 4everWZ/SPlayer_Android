@@ -223,6 +223,31 @@ class PlayerScreenSupportTest {
     }
 
     @Test
+    fun `profile background image request keeps cache key stable when url stays same`() {
+        val first = resolveProfileBackgroundImageRequestIdentity(
+            imageUrl = "https://example.com/user-bg.jpg",
+        )
+        val second = resolveProfileBackgroundImageRequestIdentity(
+            imageUrl = "https://example.com/user-bg.jpg",
+        )
+
+        assertEquals("https://example.com/user-bg.jpg", first.imageUrl)
+        assertEquals(first.imageUrl, second.imageUrl)
+        assertEquals(first.memoryCacheKey, second.memoryCacheKey)
+        assertEquals(first.diskCacheKey, second.diskCacheKey)
+    }
+
+    @Test
+    fun `my hero background follows avatar because profile background can be stale`() {
+        val resolved = resolveMyHeroBackgroundImageUrl(
+            avatarUrl = "https://example.com/new-avatar.jpg",
+            backgroundUrl = "https://example.com/stale-background.jpg",
+        )
+
+        assertEquals("https://example.com/new-avatar.jpg", resolved)
+    }
+
+    @Test
     fun `disc rotation keeps netease style long play cycle`() {
         assertEquals(18_000, DISC_ROTATION_CYCLE_MS)
     }

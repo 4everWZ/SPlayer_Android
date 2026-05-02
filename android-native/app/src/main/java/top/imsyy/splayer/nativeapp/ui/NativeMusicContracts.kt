@@ -54,7 +54,7 @@ fun buildRecommendFeedUi(
 
     return RecommendFeedUi(
         heroCards = heroCards,
-        guessTracks = discovery.newSongs.take(6),
+        guessTracks = discovery.dailySongs.ifEmpty { discovery.newSongs }.take(6),
         recommendedPlaylists = discovery.recommendedPlaylists.drop(heroCards.size).take(6),
         newAlbums = discovery.newAlbums.take(6),
         topPlaylists = discovery.topPlaylists.take(6),

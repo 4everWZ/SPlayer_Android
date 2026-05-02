@@ -36,14 +36,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import top.imsyy.splayer.nativeapp.model.AlbumItem
 import top.imsyy.splayer.nativeapp.model.ListeningRankItem
 import top.imsyy.splayer.nativeapp.model.MyMusicPanelTab
@@ -223,6 +225,15 @@ private fun MyHeroHeader(
     level: Int,
     listenCount: Int,
 ) {
+    val context = LocalContext.current
+    val heroBackgroundUrl = resolveMyHeroBackgroundImageUrl(
+        avatarUrl = avatarUrl,
+        backgroundUrl = backgroundUrl,
+    )
+    val backgroundModel = rememberProfileImageRequest(
+        context = context,
+        imageUrl = heroBackgroundUrl,
+    )
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -230,7 +241,7 @@ private fun MyHeroHeader(
             .clip(RoundedCornerShape(34.dp)),
     ) {
         AsyncImage(
-            model = backgroundUrl.ifBlank { avatarUrl },
+            model = backgroundModel,
             contentDescription = nickname,
             modifier = Modifier.fillMaxSize(),
             contentScale = ContentScale.Crop,
@@ -288,6 +299,49 @@ private fun MyHeroHeader(
             }
         }
     }
+}
+
+@Composable
+private fun rememberProfileImageRequest(
+    context: android.content.Context,
+    imageUrl: String,
+): ImageRequest {
+    return androidx.compose.runtime.remember(context, imageUrl) {
+        val identity = resolveProfileBackgroundImageRequestIdentity(
+            imageUrl = imageUrl,
+        )
+        ImageRequest.Builder(context)
+            .data(identity.imageUrl)
+            .memoryCacheKey(identity.memoryCacheKey)
+            .diskCacheKey(identity.diskCacheKey)
+            .crossfade(true)
+            .build()
+    }
+}
+
+internal data class ProfileBackgroundImageRequestIdentity(
+    val imageUrl: String,
+    val memoryCacheKey: String,
+    val diskCacheKey: String,
+)
+
+internal fun resolveProfileBackgroundImageRequestIdentity(
+    imageUrl: String,
+): ProfileBackgroundImageRequestIdentity {
+    val normalizedUrl = imageUrl.trim()
+    val key = "my-profile-bg:$normalizedUrl"
+    return ProfileBackgroundImageRequestIdentity(
+        imageUrl = normalizedUrl,
+        memoryCacheKey = key,
+        diskCacheKey = key,
+    )
+}
+
+internal fun resolveMyHeroBackgroundImageUrl(
+    avatarUrl: String,
+    backgroundUrl: String,
+): String {
+    return avatarUrl.trim().ifBlank { backgroundUrl.trim() }
 }
 
 @Composable

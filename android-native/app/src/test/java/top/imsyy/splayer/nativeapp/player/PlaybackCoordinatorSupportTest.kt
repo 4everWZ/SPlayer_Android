@@ -309,6 +309,26 @@ class PlaybackCoordinatorSupportTest {
     }
 
     @Test
+    fun `previewPlayModeState changes visible mode without touching queue`() {
+        val tracks = listOf(sampleTrack(1), sampleTrack(2), sampleTrack(3))
+        val state = PlaybackUiState(
+            queue = tracks,
+            currentTrack = tracks[1],
+            currentIndex = 1,
+            playMode = PlayMode.SINGLE_LOOP,
+            errorMessage = "旧错误",
+        )
+
+        val preview = previewPlayModeState(state, PlayMode.HEART)
+
+        assertEquals(PlayMode.HEART, preview.playMode)
+        assertEquals(tracks, preview.queue)
+        assertEquals(tracks[1], preview.currentTrack)
+        assertEquals(1, preview.currentIndex)
+        assertNull(preview.errorMessage)
+    }
+
+    @Test
     fun `resolvePlayModeQueueTransition shuffles current queue immediately and keeps current track first`() {
         val tracks = listOf(sampleTrack(1), sampleTrack(2), sampleTrack(3), sampleTrack(4))
         val shuffled = listOf(tracks[3], tracks[2], tracks[0], tracks[1])

@@ -952,9 +952,14 @@ class PlayerViewModel @Inject constructor(
     fun skipPrevious() = playbackCoordinator.skipPrevious()
     fun cyclePlayMode() {
         viewModelScope.launch {
-            val nextMode = resolveNextPlayMode(playbackState.value.playMode)
+            val previousMode = playbackState.value.playMode
+            val nextMode = resolveNextPlayMode(previousMode)
+            playbackCoordinator.previewPlayMode(nextMode)
             val heartTracks = if (nextMode == PlayMode.HEART) {
-                loadHeartRateTracksForCurrent() ?: return@launch
+                loadHeartRateTracksForCurrent() ?: run {
+                    playbackCoordinator.restorePreviewedPlayMode(previousMode)
+                    return@launch
+                }
             } else {
                 null
             }

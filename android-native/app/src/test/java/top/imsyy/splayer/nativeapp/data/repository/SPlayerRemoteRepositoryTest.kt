@@ -29,6 +29,21 @@ class SPlayerRemoteRepositoryTest {
                       ]
                     }
                     """.trimIndent(),
+                    "netease/recommend/songs" to """
+                    {
+                      "data": {
+                        "dailySongs": [
+                          {
+                            "id": 901,
+                            "name": "日推歌曲",
+                            "dt": 199000,
+                            "ar": [{ "name": "日推歌手" }],
+                            "al": { "name": "日推专辑", "picUrl": "https://example.com/daily.jpg" }
+                          }
+                        ]
+                      }
+                    }
+                    """.trimIndent(),
                     "netease/top/song" to """
                     {
                       "data": [
@@ -71,6 +86,8 @@ class SPlayerRemoteRepositoryTest {
 
         assertEquals(1, result.recommendedPlaylists.size)
         assertEquals("推荐歌单", result.recommendedPlaylists.first().name)
+        assertEquals(1, result.dailySongs.size)
+        assertEquals("日推歌曲", result.dailySongs.first().name)
         assertEquals(1, result.newSongs.size)
         assertEquals("新歌一", result.newSongs.first().name)
         assertEquals(1, result.topArtists.size)
@@ -79,6 +96,39 @@ class SPlayerRemoteRepositoryTest {
         assertEquals("新专辑", result.newAlbums.first().name)
         assertEquals(1, result.topPlaylists.size)
         assertEquals("飙升榜", result.topPlaylists.first().name)
+    }
+
+    @Test
+    fun `fetchDiscoveryHome falls back to top songs when daily recommendations are unavailable`() = runBlocking {
+        val repository = SPlayerRemoteRepository(
+            api = FakeApiService(
+                responses = mapOf(
+                    "netease/personalized" to """{"result": []}""",
+                    "netease/recommend/songs" to """{"code": 301, "data": { "dailySongs": [] }}""",
+                    "netease/top/song" to """
+                    {
+                      "data": [
+                        {
+                          "id": 101,
+                          "name": "新歌兜底",
+                          "dt": 180000,
+                          "artists": [{ "name": "歌手甲" }],
+                          "album": { "name": "专辑甲", "picUrl": "https://example.com/a1.jpg" }
+                        }
+                      ]
+                    }
+                    """.trimIndent(),
+                    "netease/top/artists" to """{"artists": []}""",
+                    "netease/album/new" to """{"albums": []}""",
+                    "netease/toplist/detail" to """{"list": []}""",
+                ),
+            ),
+        )
+
+        val result = repository.fetchDiscoveryHome(forceRefresh = true)
+
+        assertEquals("新歌兜底", result.dailySongs.first().name)
+        assertEquals("新歌兜底", result.newSongs.first().name)
     }
 
     @Test
@@ -319,6 +369,44 @@ class SPlayerRemoteRepositoryTest {
         assertEquals("听歌排行第一", result.listeningRanks.first().track.name)
         assertEquals(28, result.listeningRanks.first().playCount)
         assertEquals("收藏专辑", result.albums.first().name)
+    }
+
+    @Test
+    fun `fetchMyMusicHome reads alternate profile background fields from user detail`() = runBlocking {
+        val repository = SPlayerRemoteRepository(
+            api = FakeApiService(
+                responses = mapOf(
+                    "netease/login/status" to """
+                    {
+                      "data": {
+                        "account": { "id": 9001 },
+                        "profile": { "userId": 9001, "nickname": "原生用户", "avatarUrl": "https://example.com/u.jpg" }
+                      }
+                    }
+                    """.trimIndent(),
+                    "netease/user/detail" to """
+                    {
+                      "level": 9,
+                      "listenSongs": 5759,
+                      "profile": {
+                        "userId": 9001,
+                        "nickname": "原生用户",
+                        "avatarUrl": "https://example.com/u.jpg",
+                        "backgroundImageUrl": "https://example.com/bg-alt.jpg"
+                      }
+                    }
+                    """.trimIndent(),
+                    "netease/likelist" to """{"ids": []}""",
+                    "netease/user/playlist" to """{"playlist": []}""",
+                    "netease/album/sublist" to """{"data": []}""",
+                    "netease/user/record" to """{"weekData": []}""",
+                ),
+            ),
+        )
+
+        val result = repository.fetchMyMusicHome(recentTracks = emptyList())
+
+        assertEquals("https://example.com/bg-alt.jpg", result.currentUser?.backgroundUrl)
     }
 
     @Test
@@ -1436,6 +1524,21 @@ class SPlayerRemoteRepositoryTest {
                       ]
                     }
                 """.trimIndent(),
+                "netease/recommend/songs" to """
+                    {
+                      "data": {
+                        "dailySongs": [
+                          {
+                            "id": 901,
+                            "name": "日推歌曲",
+                            "dt": 199000,
+                            "ar": [{ "name": "日推歌手" }],
+                            "al": { "name": "日推专辑", "picUrl": "https://example.com/daily.jpg" }
+                          }
+                        ]
+                      }
+                    }
+                """.trimIndent(),
                 "netease/top/song" to """
                     {
                       "data": [
@@ -1478,7 +1581,7 @@ class SPlayerRemoteRepositoryTest {
         val second = repository.fetchDiscoveryHome()
 
         assertEquals(first, second)
-        assertEquals(5, api.calls.size)
+        assertEquals(6, api.calls.size)
     }
 
     @Test
@@ -1491,11 +1594,12 @@ class SPlayerRemoteRepositoryTest {
         repository.fetchDiscoveryHome()
         repository.fetchDiscoveryHome(forceRefresh = true)
 
-        assertEquals(10, api.calls.size)
-        val forceCalls = api.calls.drop(5)
+        assertEquals(12, api.calls.size)
+        val forceCalls = api.calls.drop(6)
         assertEquals(
             listOf(
                 "netease/personalized",
+                "netease/recommend/songs",
                 "netease/top/song",
                 "netease/top/artists",
                 "netease/album/new",
@@ -1519,7 +1623,7 @@ class SPlayerRemoteRepositoryTest {
         expireDiscoveryHomeCache(repository)
         repository.fetchDiscoveryHome()
 
-        assertEquals(10, api.calls.size)
+        assertEquals(12, api.calls.size)
     }
 
     @Test
@@ -1617,6 +1721,21 @@ private fun discoveryHomeResponses(): Map<String, String> {
               "result": [
                 { "id": 1, "name": "推荐歌单", "picUrl": "https://example.com/p1.jpg", "trackCount": 20 }
               ]
+            }
+        """.trimIndent(),
+        "netease/recommend/songs" to """
+            {
+              "data": {
+                "dailySongs": [
+                  {
+                    "id": 901,
+                    "name": "日推歌曲",
+                    "dt": 199000,
+                    "ar": [{ "name": "日推歌手" }],
+                    "al": { "name": "日推专辑", "picUrl": "https://example.com/daily.jpg" }
+                  }
+                ]
+              }
             }
         """.trimIndent(),
         "netease/top/song" to """

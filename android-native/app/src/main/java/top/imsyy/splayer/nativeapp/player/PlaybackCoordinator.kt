@@ -244,6 +244,16 @@ internal fun resolveNewQueuePlayMode(current: PlayMode): PlayMode {
     return if (current == PlayMode.HEART) PlayMode.LIST_LOOP else current
 }
 
+internal fun previewPlayModeState(
+    state: PlaybackUiState,
+    targetMode: PlayMode,
+): PlaybackUiState {
+    return state.copy(
+        playMode = targetMode,
+        errorMessage = null,
+    )
+}
+
 internal fun resolvePlayModeQueueTransition(
     currentQueue: List<TrackItem>,
     currentIndex: Int,
@@ -556,6 +566,14 @@ class PlaybackCoordinator @Inject constructor(
         appScope.launch { setPlayMode(resolveNextPlayMode(_uiState.value.playMode)) }
     }
 
+    fun previewPlayMode(targetMode: PlayMode) {
+        _uiState.value = previewPlayModeState(_uiState.value, targetMode)
+    }
+
+    fun restorePreviewedPlayMode(targetMode: PlayMode) {
+        _uiState.value = _uiState.value.copy(playMode = targetMode)
+    }
+
     suspend fun setPlayMode(
         targetMode: PlayMode,
         heartTracks: List<TrackItem>? = null,
@@ -564,15 +582,19 @@ class PlaybackCoordinator @Inject constructor(
             reportError("心动模式暂无推荐")
             return false
         }
+        val currentMode = _uiState.value.playMode
+        _uiState.value = previewPlayModeState(_uiState.value, targetMode)
         val state = _uiState.value
-        val transition = resolvePlayModeQueueTransition(
-            currentQueue = state.queue,
-            currentIndex = state.currentIndex,
-            currentMode = state.playMode,
-            targetMode = targetMode,
-            originalQueue = originalQueueForMode,
-            heartTracks = heartTracks,
-        )
+        val transition = withContext(Dispatchers.Default) {
+            resolvePlayModeQueueTransition(
+                currentQueue = state.queue,
+                currentIndex = state.currentIndex,
+                currentMode = currentMode,
+                targetMode = targetMode,
+                originalQueue = originalQueueForMode,
+                heartTracks = heartTracks,
+            )
+        }
         originalQueueForMode = transition.originalQueue
         if (transition.queue != state.queue) {
             queueRepository.replaceQueue(transition.queue)
