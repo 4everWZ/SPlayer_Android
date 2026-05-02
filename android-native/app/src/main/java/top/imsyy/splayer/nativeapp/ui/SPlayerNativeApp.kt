@@ -253,6 +253,10 @@ fun SPlayerNativeApp() {
                                 )
                                 navController.navigate(Routes.Player)
                             },
+                            onOpenPlayer = {
+                                navController.navigate(Routes.Player)
+                            },
+                            currentTrackId = miniPlayerState.currentTrack?.id,
                             onPlayTrack = { tracks, index ->
                                 playerViewModel.playTracks(tracks, index)
                                 navController.navigate(Routes.Player)

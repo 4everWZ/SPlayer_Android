@@ -237,6 +237,28 @@ class PlaybackCoordinatorSupportTest {
     }
 
     @Test
+    fun `resolveQueueMoveTargetIndex lets manual next leave single loop like desktop`() {
+        assertEquals(
+            2,
+            resolveQueueMoveTargetIndex(
+                queueSize = 3,
+                currentIndex = 1,
+                playMode = PlayMode.SINGLE_LOOP,
+                delta = 1,
+            ),
+        )
+        assertEquals(
+            2,
+            resolveQueueMoveTargetIndex(
+                queueSize = 3,
+                currentIndex = 0,
+                playMode = PlayMode.SINGLE_LOOP,
+                delta = -1,
+            ),
+        )
+    }
+
+    @Test
     fun `resolvePlaybackQueuePlan shuffles the whole queue instead of picking one random next track`() {
         val tracks = listOf(sampleTrack(1), sampleTrack(2), sampleTrack(3), sampleTrack(4))
         val shuffled = listOf(tracks[2], tracks[0], tracks[3], tracks[1])
@@ -268,6 +290,78 @@ class PlaybackCoordinatorSupportTest {
 
         assertEquals(listOf(2L, 3L, 1L, 4L), plan.tracks.map { it.id })
         assertEquals(0, plan.startIndex)
+    }
+
+    @Test
+    fun `resolveNextPlayMode cycles through desktop aligned modes`() {
+        assertEquals(PlayMode.LIST_LOOP, resolveNextPlayMode(PlayMode.SEQUENCE))
+        assertEquals(PlayMode.SINGLE_LOOP, resolveNextPlayMode(PlayMode.LIST_LOOP))
+        assertEquals(PlayMode.SHUFFLE, resolveNextPlayMode(PlayMode.SINGLE_LOOP))
+        assertEquals(PlayMode.HEART, resolveNextPlayMode(PlayMode.SHUFFLE))
+        assertEquals(PlayMode.SEQUENCE, resolveNextPlayMode(PlayMode.HEART))
+    }
+
+    @Test
+    fun `resolveNewQueuePlayMode leaves heartbeat when ordinary playlist starts`() {
+        assertEquals(PlayMode.LIST_LOOP, resolveNewQueuePlayMode(PlayMode.HEART))
+        assertEquals(PlayMode.SHUFFLE, resolveNewQueuePlayMode(PlayMode.SHUFFLE))
+        assertEquals(PlayMode.SINGLE_LOOP, resolveNewQueuePlayMode(PlayMode.SINGLE_LOOP))
+    }
+
+    @Test
+    fun `resolvePlayModeQueueTransition shuffles current queue immediately and keeps current track first`() {
+        val tracks = listOf(sampleTrack(1), sampleTrack(2), sampleTrack(3), sampleTrack(4))
+        val shuffled = listOf(tracks[3], tracks[2], tracks[0], tracks[1])
+
+        val transition = resolvePlayModeQueueTransition(
+            currentQueue = tracks,
+            currentIndex = 1,
+            currentMode = PlayMode.SINGLE_LOOP,
+            targetMode = PlayMode.SHUFFLE,
+            originalQueue = null,
+            shuffledTracks = shuffled,
+        )
+
+        assertEquals(listOf(2L, 4L, 3L, 1L), transition.queue.map { it.id })
+        assertEquals(0, transition.currentIndex)
+        assertEquals(listOf(1L, 2L, 3L, 4L), transition.originalQueue?.map { it.id })
+    }
+
+    @Test
+    fun `resolvePlayModeQueueTransition restores original queue when leaving shuffled mode`() {
+        val original = listOf(sampleTrack(1), sampleTrack(2), sampleTrack(3), sampleTrack(4))
+        val shuffled = listOf(original[1], original[3], original[2], original[0])
+
+        val transition = resolvePlayModeQueueTransition(
+            currentQueue = shuffled,
+            currentIndex = 0,
+            currentMode = PlayMode.SHUFFLE,
+            targetMode = PlayMode.LIST_LOOP,
+            originalQueue = original,
+        )
+
+        assertEquals(listOf(1L, 2L, 3L, 4L), transition.queue.map { it.id })
+        assertEquals(1, transition.currentIndex)
+        assertNull(transition.originalQueue)
+    }
+
+    @Test
+    fun `resolvePlayModeQueueTransition builds heartbeat queue from current track and recommendations`() {
+        val tracks = listOf(sampleTrack(1), sampleTrack(2), sampleTrack(3))
+        val heartTracks = listOf(sampleTrack(5), sampleTrack(2), sampleTrack(6))
+
+        val transition = resolvePlayModeQueueTransition(
+            currentQueue = tracks,
+            currentIndex = 1,
+            currentMode = PlayMode.SHUFFLE,
+            targetMode = PlayMode.HEART,
+            originalQueue = null,
+            heartTracks = heartTracks,
+        )
+
+        assertEquals(listOf(2L, 5L, 6L), transition.queue.map { it.id })
+        assertEquals(0, transition.currentIndex)
+        assertEquals(listOf(1L, 2L, 3L), transition.originalQueue?.map { it.id })
     }
 
     @Test

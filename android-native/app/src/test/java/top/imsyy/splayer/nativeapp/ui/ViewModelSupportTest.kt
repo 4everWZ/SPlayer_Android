@@ -4,9 +4,39 @@ import top.imsyy.splayer.nativeapp.model.CommentItem
 import top.imsyy.splayer.nativeapp.model.CommentPageResult
 import top.imsyy.splayer.nativeapp.model.TrackItem
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Test
 
 class ViewModelSupportTest {
+    @Test
+    fun `discovery refresh coordinator consumes one automatic force refresh per foreground epoch`() {
+        val coordinator = DiscoveryRefreshCoordinator()
+
+        assertEquals(true, coordinator.resolveForceRefresh(forceRefresh = false))
+        assertEquals(false, coordinator.resolveForceRefresh(forceRefresh = false))
+
+        coordinator.markAppForegrounded()
+
+        assertEquals(true, coordinator.resolveForceRefresh(forceRefresh = false))
+        assertEquals(false, coordinator.resolveForceRefresh(forceRefresh = false))
+    }
+
+    @Test
+    fun `discovery refresh coordinator keeps manual force independent from automatic epoch`() {
+        val coordinator = DiscoveryRefreshCoordinator()
+
+        assertEquals(true, coordinator.resolveForceRefresh(forceRefresh = true))
+        assertEquals(true, coordinator.resolveForceRefresh(forceRefresh = false))
+        assertEquals(false, coordinator.resolveForceRefresh(forceRefresh = false))
+    }
+
+    @Test
+    fun `refresh policy allows force refresh to replace active ordinary refresh`() {
+        assertEquals(false, shouldStartDiscoveryRefresh(refreshInProgress = true, forceRefresh = false))
+        assertEquals(true, shouldStartDiscoveryRefresh(refreshInProgress = true, forceRefresh = true))
+        assertEquals(true, shouldStartDiscoveryRefresh(refreshInProgress = false, forceRefresh = false))
+    }
+
     @Test
     fun `sanitizeLoadErrorMessage hides raw duplicated json parse details`() {
         val message = sanitizeLoadErrorMessage(
@@ -93,6 +123,37 @@ class ViewModelSupportTest {
         assertEquals(80, request.tracks.size)
         assertEquals(71, request.startIndex)
         assertEquals(72L, request.tracks[request.startIndex].id)
+    }
+
+    @Test
+    fun `resolvePlaylistPlaybackRequest opens player instead of restarting current track`() {
+        val loadedTracks = listOf(sampleTrack(id = 1L), sampleTrack(id = 2L), sampleTrack(id = 3L))
+
+        val request = resolvePlaylistPlaybackRequest(
+            clickedTrackId = 2L,
+            loadedTracks = loadedTracks,
+            clickedIndex = 1,
+            currentTrackId = 2L,
+        )
+
+        assertFalse(request.shouldStartPlayback)
+        assertEquals(1, request.startIndex)
+    }
+
+    @Test
+    fun `resolvePlaylistCurrentTrackLazyIndex returns null when current track is absent`() {
+        val loadedTracks = listOf(sampleTrack(id = 1L), sampleTrack(id = 2L), sampleTrack(id = 3L))
+
+        assertEquals(null, resolvePlaylistCurrentTrackLazyIndex(null, loadedTracks, leadingItemCount = 3))
+        assertEquals(null, resolvePlaylistCurrentTrackLazyIndex(0L, loadedTracks, leadingItemCount = 3))
+        assertEquals(null, resolvePlaylistCurrentTrackLazyIndex(9L, loadedTracks, leadingItemCount = 3))
+    }
+
+    @Test
+    fun `resolvePlaylistCurrentTrackLazyIndex offsets loaded track index by leading items`() {
+        val loadedTracks = listOf(sampleTrack(id = 10L), sampleTrack(id = 20L), sampleTrack(id = 30L))
+
+        assertEquals(5, resolvePlaylistCurrentTrackLazyIndex(30L, loadedTracks, leadingItemCount = 3))
     }
 
     @Test

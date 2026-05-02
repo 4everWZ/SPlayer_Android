@@ -19,9 +19,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Menu
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -93,6 +95,16 @@ fun HomeScreen(
                 )
                 IconButton(onClick = onOpenSearch) {
                     Icon(Icons.Rounded.Search, contentDescription = "打开搜索")
+                }
+                IconButton(
+                    onClick = { viewModel.refresh(forceRefresh = true, showLoading = false) },
+                    enabled = !state.refreshing,
+                ) {
+                    if (state.refreshing) {
+                        CircularProgressIndicator(modifier = Modifier.size(22.dp))
+                    } else {
+                        Icon(Icons.Rounded.Refresh, contentDescription = "刷新推荐")
+                    }
                 }
             }
         }

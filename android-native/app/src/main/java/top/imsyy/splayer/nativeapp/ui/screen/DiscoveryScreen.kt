@@ -16,10 +16,13 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ArrowOutward
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -75,15 +78,30 @@ fun DiscoveryScreen(
                     style = MaterialTheme.typography.headlineMedium,
                     fontWeight = FontWeight.Bold,
                 )
-                Text(
-                    text = "搜歌",
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(999.dp))
-                        .clickable(onClick = onOpenSearch)
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                    color = MaterialTheme.colorScheme.primary,
-                    style = MaterialTheme.typography.labelLarge,
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text(
+                        text = "搜歌",
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(999.dp))
+                            .clickable(onClick = onOpenSearch)
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        color = MaterialTheme.colorScheme.primary,
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                    IconButton(
+                        onClick = { viewModel.refresh(forceRefresh = true, showLoading = false) },
+                        enabled = !state.refreshing,
+                    ) {
+                        if (state.refreshing) {
+                            CircularProgressIndicator(modifier = Modifier.size(22.dp))
+                        } else {
+                            Icon(Icons.Rounded.Refresh, contentDescription = "刷新发现")
+                        }
+                    }
+                }
             }
         }
 

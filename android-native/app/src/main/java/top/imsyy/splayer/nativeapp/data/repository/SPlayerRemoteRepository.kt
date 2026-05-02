@@ -221,11 +221,12 @@ class SPlayerRemoteRepository @Inject constructor(
                 ?.let { return it }
         }
         return supervisorScope {
-            val playlistResponse = async { getNetease("personalized", mapOf("limit" to "12")) }
-            val songResponse = async { getNetease("top/song", mapOf("type" to "0")) }
-            val artistResponse = async { getNetease("top/artists", mapOf("limit" to "12")) }
-            val albumResponse = async { getNetease("album/new") }
-            val toplistResponse = async { getNetease("toplist/detail") }
+            val timestampParam = if (forceRefresh) mapOf("timestamp" to now()) else emptyMap()
+            val playlistResponse = async { getNetease("personalized", mapOf("limit" to "12") + timestampParam) }
+            val songResponse = async { getNetease("top/song", mapOf("type" to "0") + timestampParam) }
+            val artistResponse = async { getNetease("top/artists", mapOf("limit" to "12") + timestampParam) }
+            val albumResponse = async { getNetease("album/new", timestampParam) }
+            val toplistResponse = async { getNetease("toplist/detail", timestampParam) }
             DiscoveryHomeUi(
                 recommendedPlaylists = playlistResponse.await().array("result").mapNotNull { it.toPlaylistItem() },
                 newSongs = songResponse.await().array("data").mapNotNull { it.toTrackItem() },
@@ -290,6 +291,37 @@ class SPlayerRemoteRepository @Inject constructor(
             programCount = detail.int("programCount"),
             programs = programs,
         )
+    }
+
+    suspend fun fetchLikedPlaylistId(): Long? {
+        val currentUser = fetchLoginState() ?: return null
+        val playlists = getNetease(
+            "user/playlist",
+            mapOf(
+                "uid" to currentUser.userId.toString(),
+                "limit" to "50",
+                "offset" to "0",
+                "timestamp" to now(),
+            ),
+        ).array("playlist").mapNotNull { it.toPlaylistItem() }
+        return playlists.resolveLikedPlaylist(currentUser.userId)?.id
+    }
+
+    suspend fun fetchHeartRateTracks(
+        trackId: Long,
+        playlistId: Long,
+    ): List<TrackItem> {
+        if (trackId <= 0L || playlistId <= 0L) return emptyList()
+        return getNetease(
+            "playmode/intelligence/list",
+            mapOf(
+                "id" to trackId.toString(),
+                "pid" to playlistId.toString(),
+                "timestamp" to now(),
+            ),
+        ).array("data")
+            .mapNotNull { it.toTrackItem() }
+            .distinctBy { it.id }
     }
 
     suspend fun fetchMyMusicHome(recentTracks: List<TrackItem>): MyMusicHomeUi {
@@ -833,7 +865,10 @@ class SPlayerRemoteRepository @Inject constructor(
     }
 
 private fun JsonElement.toTrackItem(): TrackItem? {
-    val song = obj
+    val root = obj
+    val song = root.obj("simpleSong").takeIf { it.isNotEmpty() }
+        ?: root.obj("songInfo").takeIf { it.isNotEmpty() }
+        ?: root
     val id = song.long("id")
     if (id <= 0L) return null
     val album = song.obj("al").takeIf { it.isNotEmpty() }

@@ -307,6 +307,7 @@ class SPlayerRemoteRepositoryTest {
         )
 
         assertEquals("原生用户", result.currentUser?.nickname)
+        assertEquals("https://example.com/bg.jpg", result.currentUser?.backgroundUrl)
         assertEquals(3, result.likedSongCount)
         assertEquals("我喜欢的音乐", result.likedPlaylist?.name)
         assertEquals(1, result.recentTracks.size)
@@ -318,6 +319,84 @@ class SPlayerRemoteRepositoryTest {
         assertEquals("听歌排行第一", result.listeningRanks.first().track.name)
         assertEquals(28, result.listeningRanks.first().playCount)
         assertEquals("收藏专辑", result.albums.first().name)
+    }
+
+    @Test
+    fun `fetchLikedPlaylistId returns current users liked playlist`() = runBlocking {
+        val api = FakeApiService(
+            responses = mapOf(
+                "netease/login/status" to """
+                {
+                  "data": {
+                    "account": { "id": 9001 },
+                    "profile": { "userId": 9001, "nickname": "原生用户" }
+                  }
+                }
+                """.trimIndent(),
+                "netease/user/playlist" to """
+                {
+                  "playlist": [
+                    {
+                      "id": 1001,
+                      "name": "我喜欢的音乐",
+                      "creator": { "userId": 9001 }
+                    },
+                    {
+                      "id": 1002,
+                      "name": "别人的歌单",
+                      "creator": { "userId": 8001 }
+                    }
+                  ]
+                }
+                """.trimIndent(),
+            ),
+        )
+        val repository = SPlayerRemoteRepository(api = api)
+
+        val playlistId = repository.fetchLikedPlaylistId()
+
+        assertEquals(1001L, playlistId)
+        val call = api.calls.first { it.url == "netease/user/playlist" }
+        assertEquals("9001", call.params["uid"])
+    }
+
+    @Test
+    fun `fetchHeartRateTracks requests intelligence list and maps songInfo payload`() = runBlocking {
+        val api = FakeApiService(
+            responses = mapOf(
+                "netease/playmode/intelligence/list" to """
+                {
+                  "code": 200,
+                  "data": [
+                    {
+                      "songInfo": {
+                        "id": 3001,
+                        "name": "心动推荐",
+                        "dt": 215000,
+                        "ar": [{ "name": "推荐歌手" }],
+                        "al": {
+                          "name": "推荐专辑",
+                          "picUrl": "https://example.com/heart.jpg"
+                        }
+                      }
+                    }
+                  ]
+                }
+                """.trimIndent(),
+            ),
+        )
+        val repository = SPlayerRemoteRepository(api = api)
+
+        val tracks = repository.fetchHeartRateTracks(trackId = 2001L, playlistId = 1001L)
+
+        assertEquals(1, tracks.size)
+        assertEquals(3001L, tracks.first().id)
+        assertEquals("心动推荐", tracks.first().name)
+        assertEquals("推荐歌手", tracks.first().artists)
+        val call = api.calls.single()
+        assertEquals("netease/playmode/intelligence/list", call.url)
+        assertEquals("2001", call.params["id"])
+        assertEquals("1001", call.params["pid"])
     }
 
     @Test
@@ -1403,51 +1482,36 @@ class SPlayerRemoteRepositoryTest {
     }
 
     @Test
+    fun `fetchDiscoveryHome force refresh bypasses cache and adds timestamp to discovery requests`() = runBlocking {
+        val api = FakeApiService(
+            responses = discoveryHomeResponses(),
+        )
+        val repository = SPlayerRemoteRepository(api = api)
+
+        repository.fetchDiscoveryHome()
+        repository.fetchDiscoveryHome(forceRefresh = true)
+
+        assertEquals(10, api.calls.size)
+        val forceCalls = api.calls.drop(5)
+        assertEquals(
+            listOf(
+                "netease/personalized",
+                "netease/top/song",
+                "netease/top/artists",
+                "netease/album/new",
+                "netease/toplist/detail",
+            ).sorted(),
+            forceCalls.map { it.url }.sorted(),
+        )
+        forceCalls.forEach { call ->
+            assertTrue("missing timestamp for ${call.url}", call.params["timestamp"].orEmpty().isNotBlank())
+        }
+    }
+
+    @Test
     fun `fetchDiscoveryHome expires stale session cache`() = runBlocking {
         val api = FakeApiService(
-            responses = mapOf(
-                "netease/personalized" to """
-                    {
-                      "result": [
-                        { "id": 1, "name": "推荐歌单", "picUrl": "https://example.com/p1.jpg", "trackCount": 20 }
-                      ]
-                    }
-                """.trimIndent(),
-                "netease/top/song" to """
-                    {
-                      "data": [
-                        {
-                          "id": 101,
-                          "name": "新歌一",
-                          "dt": 180000,
-                          "artists": [{ "name": "歌手甲" }],
-                          "album": { "name": "专辑甲", "picUrl": "https://example.com/a1.jpg" }
-                        }
-                      ]
-                    }
-                """.trimIndent(),
-                "netease/top/artists" to """
-                    {
-                      "artists": [
-                        { "id": 201, "name": "热门歌手", "img1v1Url": "https://example.com/ar1.jpg", "musicSize": 10 }
-                      ]
-                    }
-                """.trimIndent(),
-                "netease/album/new" to """
-                    {
-                      "albums": [
-                        { "id": 301, "name": "新专辑", "picUrl": "https://example.com/al1.jpg", "size": 8 }
-                      ]
-                    }
-                """.trimIndent(),
-                "netease/toplist/detail" to """
-                    {
-                      "list": [
-                        { "id": 401, "name": "飙升榜", "coverImgUrl": "https://example.com/t1.jpg", "trackCount": 100 }
-                      ]
-                    }
-                """.trimIndent(),
-            ),
+            responses = discoveryHomeResponses(),
         )
         val repository = SPlayerRemoteRepository(api = api)
 
@@ -1545,6 +1609,52 @@ private data class ApiCall(
     val url: String,
     val params: Map<String, String>,
 )
+
+private fun discoveryHomeResponses(): Map<String, String> {
+    return mapOf(
+        "netease/personalized" to """
+            {
+              "result": [
+                { "id": 1, "name": "推荐歌单", "picUrl": "https://example.com/p1.jpg", "trackCount": 20 }
+              ]
+            }
+        """.trimIndent(),
+        "netease/top/song" to """
+            {
+              "data": [
+                {
+                  "id": 101,
+                  "name": "新歌一",
+                  "dt": 180000,
+                  "artists": [{ "name": "歌手甲" }],
+                  "album": { "name": "专辑甲", "picUrl": "https://example.com/a1.jpg" }
+                }
+              ]
+            }
+        """.trimIndent(),
+        "netease/top/artists" to """
+            {
+              "artists": [
+                { "id": 201, "name": "热门歌手", "img1v1Url": "https://example.com/ar1.jpg", "musicSize": 10 }
+              ]
+            }
+        """.trimIndent(),
+        "netease/album/new" to """
+            {
+              "albums": [
+                { "id": 301, "name": "新专辑", "picUrl": "https://example.com/al1.jpg", "size": 8 }
+              ]
+            }
+        """.trimIndent(),
+        "netease/toplist/detail" to """
+            {
+              "list": [
+                { "id": 401, "name": "飙升榜", "coverImgUrl": "https://example.com/t1.jpg", "trackCount": 100 }
+              ]
+            }
+        """.trimIndent(),
+    )
+}
 
 private fun expireDiscoveryHomeCache(repository: SPlayerRemoteRepository) {
     val field = SPlayerRemoteRepository::class.java.getDeclaredField("discoveryHomeCachedAtMs")

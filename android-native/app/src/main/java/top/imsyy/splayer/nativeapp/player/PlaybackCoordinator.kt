@@ -148,7 +148,6 @@ internal fun resolveQueueMoveTargetIndex(
     if (queueSize <= 0) return null
     val safeCurrentIndex = currentIndex.coerceIn(0, queueSize - 1)
     return when (playMode) {
-        PlayMode.SINGLE_LOOP -> safeCurrentIndex
         PlayMode.SHUFFLE -> {
             if (queueSize == 1) {
                 safeCurrentIndex
@@ -161,9 +160,10 @@ internal fun resolveQueueMoveTargetIndex(
         }
         else -> {
             val raw = safeCurrentIndex + delta
+            val shouldWrap = playMode == PlayMode.LIST_LOOP || playMode == PlayMode.SINGLE_LOOP
             when {
-                raw > queueSize - 1 -> if (playMode == PlayMode.LIST_LOOP) 0 else queueSize - 1
-                raw < 0 -> if (playMode == PlayMode.LIST_LOOP) queueSize - 1 else 0
+                raw > queueSize - 1 -> if (shouldWrap) 0 else queueSize - 1
+                raw < 0 -> if (shouldWrap) queueSize - 1 else 0
                 else -> raw
             }
         }
@@ -224,6 +224,95 @@ internal fun resolvePlaybackQueuePlan(
     )
 }
 
+internal data class PlayModeQueueTransition(
+    val queue: List<TrackItem>,
+    val currentIndex: Int,
+    val originalQueue: List<TrackItem>?,
+)
+
+internal fun resolveNextPlayMode(current: PlayMode): PlayMode {
+    return when (current) {
+        PlayMode.SEQUENCE -> PlayMode.LIST_LOOP
+        PlayMode.LIST_LOOP -> PlayMode.SINGLE_LOOP
+        PlayMode.SINGLE_LOOP -> PlayMode.SHUFFLE
+        PlayMode.SHUFFLE -> PlayMode.HEART
+        PlayMode.HEART -> PlayMode.SEQUENCE
+    }
+}
+
+internal fun resolveNewQueuePlayMode(current: PlayMode): PlayMode {
+    return if (current == PlayMode.HEART) PlayMode.LIST_LOOP else current
+}
+
+internal fun resolvePlayModeQueueTransition(
+    currentQueue: List<TrackItem>,
+    currentIndex: Int,
+    currentMode: PlayMode,
+    targetMode: PlayMode,
+    originalQueue: List<TrackItem>?,
+    shuffledTracks: List<TrackItem>? = null,
+    heartTracks: List<TrackItem>? = null,
+): PlayModeQueueTransition {
+    if (currentQueue.isEmpty()) {
+        return PlayModeQueueTransition(
+            queue = currentQueue,
+            currentIndex = 0,
+            originalQueue = null,
+        )
+    }
+    val safeCurrentIndex = currentIndex.coerceIn(0, currentQueue.lastIndex)
+    val currentTrack = currentQueue[safeCurrentIndex]
+    val storedOriginal = originalQueue?.takeIf { it.isNotEmpty() }
+    return when (targetMode) {
+        PlayMode.SHUFFLE -> {
+            val baseQueue = storedOriginal ?: currentQueue
+            val baseIndex = baseQueue.indexOfFirst { it.id == currentTrack.id }
+                .takeIf { it >= 0 }
+                ?: safeCurrentIndex.coerceIn(0, baseQueue.lastIndex)
+            val plan = resolvePlaybackQueuePlan(
+                tracks = baseQueue,
+                startIndex = baseIndex,
+                playMode = PlayMode.SHUFFLE,
+                shuffledTracks = shuffledTracks,
+                keepRequestedTrackFirst = true,
+            )
+            PlayModeQueueTransition(
+                queue = plan.tracks,
+                currentIndex = plan.startIndex,
+                originalQueue = baseQueue,
+            )
+        }
+        PlayMode.HEART -> {
+            val recommendations = heartTracks.orEmpty()
+                .filterNot { it.id == currentTrack.id }
+                .distinctBy { it.id }
+            PlayModeQueueTransition(
+                queue = listOf(currentTrack) + recommendations,
+                currentIndex = 0,
+                originalQueue = storedOriginal ?: currentQueue,
+            )
+        }
+        else -> {
+            if ((currentMode == PlayMode.SHUFFLE || currentMode == PlayMode.HEART) && storedOriginal != null) {
+                val restoredIndex = storedOriginal.indexOfFirst { it.id == currentTrack.id }
+                    .takeIf { it >= 0 }
+                    ?: 0
+                PlayModeQueueTransition(
+                    queue = storedOriginal,
+                    currentIndex = restoredIndex,
+                    originalQueue = null,
+                )
+            } else {
+                PlayModeQueueTransition(
+                    queue = currentQueue,
+                    currentIndex = safeCurrentIndex,
+                    originalQueue = storedOriginal,
+                )
+            }
+        }
+    }
+}
+
 @Singleton
 class PlaybackCoordinator @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -261,6 +350,7 @@ class PlaybackCoordinator @Inject constructor(
     private var playerScreenProgressActive = false
     private var lyricScreenProgressActive = false
     private var wordLevelLyricProgressActive = false
+    private var originalQueueForMode: List<TrackItem>? = null
     private val stallTimeoutMs = 9_000L
 
     init {
@@ -396,12 +486,22 @@ class PlaybackCoordinator @Inject constructor(
         keepRequestedTrackFirstInShuffle: Boolean = true,
     ) {
         if (tracks.isEmpty()) return
+        val activePlayMode = resolveNewQueuePlayMode(_uiState.value.playMode)
         val queuePlan = resolvePlaybackQueuePlan(
             tracks = tracks,
             startIndex = startIndex,
-            playMode = _uiState.value.playMode,
+            playMode = activePlayMode,
             keepRequestedTrackFirst = keepRequestedTrackFirstInShuffle,
         )
+        if (activePlayMode != _uiState.value.playMode) {
+            _uiState.value = _uiState.value.copy(playMode = activePlayMode)
+            appSettingsStore.setPlayMode(activePlayMode)
+        }
+        originalQueueForMode = if (activePlayMode == PlayMode.SHUFFLE && queuePlan.tracks != tracks) {
+            tracks
+        } else {
+            null
+        }
         queueRepository.replaceQueue(queuePlan.tracks)
         playTrack(queuePlan.tracks[queuePlan.startIndex], queuePlan.startIndex)
     }
@@ -453,14 +553,47 @@ class PlaybackCoordinator @Inject constructor(
     }
 
     fun cyclePlayMode() {
-        val next = when (_uiState.value.playMode) {
-            PlayMode.SEQUENCE -> PlayMode.LIST_LOOP
-            PlayMode.LIST_LOOP -> PlayMode.SINGLE_LOOP
-            PlayMode.SINGLE_LOOP -> PlayMode.SHUFFLE
-            PlayMode.SHUFFLE -> PlayMode.HEART
-            PlayMode.HEART -> PlayMode.SEQUENCE
+        appScope.launch { setPlayMode(resolveNextPlayMode(_uiState.value.playMode)) }
+    }
+
+    suspend fun setPlayMode(
+        targetMode: PlayMode,
+        heartTracks: List<TrackItem>? = null,
+    ): Boolean {
+        if (targetMode == PlayMode.HEART && heartTracks.isNullOrEmpty()) {
+            reportError("心动模式暂无推荐")
+            return false
         }
-        appScope.launch { appSettingsStore.setPlayMode(next) }
+        val state = _uiState.value
+        val transition = resolvePlayModeQueueTransition(
+            currentQueue = state.queue,
+            currentIndex = state.currentIndex,
+            currentMode = state.playMode,
+            targetMode = targetMode,
+            originalQueue = originalQueueForMode,
+            heartTracks = heartTracks,
+        )
+        originalQueueForMode = transition.originalQueue
+        if (transition.queue != state.queue) {
+            queueRepository.replaceQueue(transition.queue)
+        }
+        val resolvedIndex = if (transition.queue.isEmpty()) {
+            -1
+        } else {
+            transition.currentIndex.coerceIn(0, transition.queue.lastIndex)
+        }
+        _uiState.value = _uiState.value.copy(
+            queue = transition.queue,
+            currentIndex = resolvedIndex,
+            playMode = targetMode,
+            errorMessage = null,
+        )
+        appSettingsStore.setPlayMode(targetMode)
+        return true
+    }
+
+    fun reportError(message: String) {
+        _uiState.value = _uiState.value.copy(errorMessage = message)
     }
 
     fun playQueueIndex(index: Int) {

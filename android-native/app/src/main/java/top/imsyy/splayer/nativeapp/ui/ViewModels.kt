@@ -3,12 +3,19 @@ package top.imsyy.splayer.nativeapp.ui
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.SavedStateHandle
+import android.app.Activity
+import android.app.Application
+import android.os.Bundle
+import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import javax.inject.Singleton
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -32,6 +39,7 @@ import top.imsyy.splayer.nativeapp.model.LyricLineUi
 import top.imsyy.splayer.nativeapp.model.MyMusicHomeUi
 import top.imsyy.splayer.nativeapp.model.MyMusicPanelTab
 import top.imsyy.splayer.nativeapp.model.PodcastHomeUi
+import top.imsyy.splayer.nativeapp.model.PlayMode
 import top.imsyy.splayer.nativeapp.model.PlaylistDetailUi
 import top.imsyy.splayer.nativeapp.model.PlaylistItem
 import top.imsyy.splayer.nativeapp.model.MyMusicPanelUi
@@ -42,7 +50,9 @@ import top.imsyy.splayer.nativeapp.model.TrackItem
 import top.imsyy.splayer.nativeapp.model.ThemeMode
 import top.imsyy.splayer.nativeapp.model.UserAccountUi
 import top.imsyy.splayer.nativeapp.player.PlaybackCoordinator
+import top.imsyy.splayer.nativeapp.player.resolveNextPlayMode
 import top.imsyy.splayer.nativeapp.ui.navigation.Routes
+import android.content.Context
 
 data class AppChromeUiState(
     val showQueueCount: Boolean = true,
@@ -84,12 +94,73 @@ data class HomeUiState(
     val selectedChannel: RecommendChannel = RecommendChannel.Recommend,
     val searchHint: String = "搜索歌曲、歌手、专辑",
     val loading: Boolean = true,
+    val refreshing: Boolean = false,
     val errorMessage: String? = null,
 )
+
+@Singleton
+class DiscoveryRefreshCoordinator() {
+    @Inject
+    constructor(
+        @ApplicationContext context: Context,
+        remoteRepository: SPlayerRemoteRepository,
+    ) : this() {
+        this.remoteRepository = remoteRepository
+        registerForegroundCallbacks(context)
+    }
+
+    private val lock = Mutex()
+    private var nextAutomaticForceRefresh = true
+    private var startedActivityCount = 0
+    private var remoteRepository: SPlayerRemoteRepository? = null
+
+    private fun registerForegroundCallbacks(context: Context) {
+        (context as? Application)?.registerActivityLifecycleCallbacks(
+            object : Application.ActivityLifecycleCallbacks {
+                override fun onActivityStarted(activity: Activity) {
+                    val wasBackground = startedActivityCount == 0
+                    startedActivityCount += 1
+                    if (wasBackground) markAppForegrounded()
+                }
+
+                override fun onActivityStopped(activity: Activity) {
+                    startedActivityCount = (startedActivityCount - 1).coerceAtLeast(0)
+                }
+
+                override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) = Unit
+                override fun onActivityResumed(activity: Activity) = Unit
+                override fun onActivityPaused(activity: Activity) = Unit
+                override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) = Unit
+                override fun onActivityDestroyed(activity: Activity) = Unit
+            },
+        )
+    }
+
+    fun markAppForegrounded() {
+        nextAutomaticForceRefresh = true
+    }
+
+    fun resolveForceRefresh(forceRefresh: Boolean): Boolean {
+        if (forceRefresh) return true
+        if (!nextAutomaticForceRefresh) return false
+        nextAutomaticForceRefresh = false
+        return true
+    }
+
+    suspend fun fetchDiscoveryHome(forceRefresh: Boolean): DiscoveryHomeUi {
+        val repository = requireNotNull(remoteRepository) {
+            "DiscoveryRefreshCoordinator requires SPlayerRemoteRepository for data loading"
+        }
+        return lock.withLock {
+            repository.fetchDiscoveryHome(forceRefresh = resolveForceRefresh(forceRefresh))
+        }
+    }
+}
 
 @HiltViewModel
 class HomeViewModel @Inject constructor(
     private val remoteRepository: SPlayerRemoteRepository,
+    private val discoveryRefreshCoordinator: DiscoveryRefreshCoordinator,
     queueRepository: QueueRepository,
     private val appSettingsStore: AppSettingsStore,
 ) : ViewModel() {
@@ -124,21 +195,30 @@ class HomeViewModel @Inject constructor(
         forceRefresh: Boolean = false,
         showLoading: Boolean = true,
     ) {
-        if (refreshJob?.isActive == true) return
+        val activeRefresh = refreshJob
+        val refreshInProgress = activeRefresh?.isActive == true
+        if (!shouldStartDiscoveryRefresh(refreshInProgress = refreshInProgress, forceRefresh = forceRefresh)) {
+            return
+        }
+        if (refreshInProgress) {
+            activeRefresh.cancel()
+        }
         refreshJob = viewModelScope.launch {
             val hasContent = latestDiscoveryHome.hasDiscoveryHomeContent()
             val visibleLoading = shouldShowRefreshLoading(
                 hasContent = hasContent,
                 showLoading = showLoading,
             )
+            val visibleRefreshing = forceRefresh && hasContent
             _uiState.value = _uiState.value.copy(
                 loading = visibleLoading,
+                refreshing = visibleRefreshing,
                 errorMessage = null,
             )
             runCatching {
                 supervisorScope {
                     val userDeferred = async { remoteRepository.fetchLoginState() }
-                    val discoveryDeferred = async { remoteRepository.fetchDiscoveryHome(forceRefresh = forceRefresh) }
+                    val discoveryDeferred = async { discoveryRefreshCoordinator.fetchDiscoveryHome(forceRefresh = forceRefresh) }
                     val searchHintDeferred = async { remoteRepository.fetchSearchDefault() }
                     Triple(
                         userDeferred.await(),
@@ -156,10 +236,13 @@ class HomeViewModel @Inject constructor(
                     feed = buildRecommendFeedUi(discovery, recentFlow.value),
                     searchHint = searchHintResult.ifBlank { "搜索歌曲、歌手、专辑" },
                     loading = false,
+                    refreshing = false,
                 )
             }.onFailure { error ->
+                if (error is CancellationException) throw error
                 _uiState.value = _uiState.value.copy(
                     loading = false,
+                    refreshing = false,
                     errorMessage = if (visibleLoading || !hasContent) {
                         sanitizeLoadErrorMessage(error.message, "加载首页失败")
                     } else {
@@ -178,12 +261,13 @@ class HomeViewModel @Inject constructor(
 data class DiscoveryUiState(
     val content: DiscoveryBrowseUi = DiscoveryBrowseUi(),
     val loading: Boolean = true,
+    val refreshing: Boolean = false,
     val errorMessage: String? = null,
 )
 
 @HiltViewModel
 class DiscoveryViewModel @Inject constructor(
-    private val remoteRepository: SPlayerRemoteRepository,
+    private val discoveryRefreshCoordinator: DiscoveryRefreshCoordinator,
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(DiscoveryUiState())
     val uiState: StateFlow<DiscoveryUiState> = _uiState.asStateFlow()
@@ -197,7 +281,14 @@ class DiscoveryViewModel @Inject constructor(
         forceRefresh: Boolean = false,
         showLoading: Boolean = true,
     ) {
-        if (refreshJob?.isActive == true) return
+        val activeRefresh = refreshJob
+        val refreshInProgress = activeRefresh?.isActive == true
+        if (!shouldStartDiscoveryRefresh(refreshInProgress = refreshInProgress, forceRefresh = forceRefresh)) {
+            return
+        }
+        if (refreshInProgress) {
+            activeRefresh.cancel()
+        }
         refreshJob = viewModelScope.launch {
             val currentState = _uiState.value
             val hasContent = currentState.content.hasDiscoveryBrowseContent()
@@ -205,20 +296,25 @@ class DiscoveryViewModel @Inject constructor(
                 hasContent = hasContent,
                 showLoading = showLoading,
             )
+            val visibleRefreshing = forceRefresh && hasContent
             _uiState.value = currentState.copy(
                 loading = visibleLoading,
+                refreshing = visibleRefreshing,
                 errorMessage = null,
             )
             runCatching {
-                buildDiscoveryBrowseUi(remoteRepository.fetchDiscoveryHome(forceRefresh = forceRefresh))
+                buildDiscoveryBrowseUi(discoveryRefreshCoordinator.fetchDiscoveryHome(forceRefresh = forceRefresh))
             }.onSuccess { content ->
                 _uiState.value = DiscoveryUiState(
                     content = content,
                     loading = false,
+                    refreshing = false,
                 )
             }.onFailure { error ->
+                if (error is CancellationException) throw error
                 _uiState.value = _uiState.value.copy(
                     loading = false,
+                    refreshing = false,
                     errorMessage = if (visibleLoading || !hasContent) {
                         sanitizeLoadErrorMessage(error.message, "加载发现页失败")
                     } else {
@@ -307,10 +403,15 @@ class MyViewModel @Inject constructor(
         refresh()
     }
 
-    fun refresh() {
+    fun refresh(showLoading: Boolean = true) {
         viewModelScope.launch {
             val recent = recentFlow.value
-            _uiState.value = _uiState.value.copy(loading = true, errorMessage = null)
+            val currentState = _uiState.value
+            val hasContent = currentState.content.hasMyMusicContent()
+            _uiState.value = currentState.copy(
+                loading = shouldShowRefreshLoading(hasContent = hasContent, showLoading = showLoading),
+                errorMessage = null,
+            )
             runCatching {
                 remoteRepository.fetchMyMusicHome(recent)
             }.onSuccess { content ->
@@ -322,6 +423,14 @@ class MyViewModel @Inject constructor(
                 )
                 prewarmLikedPlaylist(content.likedPlaylist)
             }.onFailure { error ->
+                if (error is CancellationException) throw error
+                if (hasContent && !showLoading) {
+                    _uiState.value = _uiState.value.copy(
+                        loading = false,
+                        errorMessage = null,
+                    )
+                    return@onFailure
+                }
                 val fallback = MyMusicHomeUi(recentTracks = recent)
                 _uiState.value = MyUiState(
                     content = fallback,
@@ -841,7 +950,17 @@ class PlayerViewModel @Inject constructor(
     fun togglePlayback() = playbackCoordinator.togglePlayback()
     fun skipNext() = playbackCoordinator.skipNext()
     fun skipPrevious() = playbackCoordinator.skipPrevious()
-    fun cyclePlayMode() = playbackCoordinator.cyclePlayMode()
+    fun cyclePlayMode() {
+        viewModelScope.launch {
+            val nextMode = resolveNextPlayMode(playbackState.value.playMode)
+            val heartTracks = if (nextMode == PlayMode.HEART) {
+                loadHeartRateTracksForCurrent() ?: return@launch
+            } else {
+                null
+            }
+            playbackCoordinator.setPlayMode(nextMode, heartTracks)
+        }
+    }
     fun seekTo(positionMs: Long) = playbackCoordinator.seekTo(positionMs)
     fun playQueueIndex(index: Int) = playbackCoordinator.playQueueIndex(index)
     fun setPlayerScreenCadence(
@@ -853,6 +972,40 @@ class PlayerViewModel @Inject constructor(
         lyricScreenActive = lyricScreenActive,
         wordLevelLyricActive = wordLevelLyricActive,
     )
+
+    private suspend fun loadHeartRateTracksForCurrent(): List<TrackItem>? {
+        val currentTrack = playbackState.value.currentTrack
+        if (currentTrack == null || currentTrack.id <= 0L) {
+            playbackCoordinator.reportError("请先播放一首歌曲后再开启心动模式")
+            return null
+        }
+        val playlistId = runCatching {
+            remoteRepository.fetchLikedPlaylistId()
+        }.getOrElse { error ->
+            if (error is CancellationException) throw error
+            playbackCoordinator.reportError("心动模式需要登录网易云账号")
+            return null
+        }
+        if (playlistId == null || playlistId <= 0L) {
+            playbackCoordinator.reportError("心动模式需要登录网易云账号")
+            return null
+        }
+        val tracks = runCatching {
+            remoteRepository.fetchHeartRateTracks(
+                trackId = currentTrack.id,
+                playlistId = playlistId,
+            )
+        }.getOrElse { error ->
+            if (error is CancellationException) throw error
+            playbackCoordinator.reportError(sanitizeLoadErrorMessage(error.message, "心动模式推荐加载失败"))
+            return null
+        }
+        if (tracks.isEmpty()) {
+            playbackCoordinator.reportError("心动模式暂无推荐")
+            return null
+        }
+        return tracks
+    }
 
     fun setShowTranslation(enabled: Boolean) {
         viewModelScope.launch {
@@ -1185,17 +1338,20 @@ internal fun resolveMaxPlaylistPageRequests(
 internal data class PlaylistPlaybackRequest(
     val tracks: List<TrackItem>,
     val startIndex: Int,
+    val shouldStartPlayback: Boolean = true,
 )
 
 internal fun resolvePlaylistPlaybackRequest(
     clickedTrackId: Long,
     loadedTracks: List<TrackItem>,
     clickedIndex: Int,
+    currentTrackId: Long? = null,
 ): PlaylistPlaybackRequest {
     if (loadedTracks.isEmpty()) {
         return PlaylistPlaybackRequest(
             tracks = loadedTracks,
             startIndex = 0,
+            shouldStartPlayback = currentTrackId != clickedTrackId,
         )
     }
     val resolvedIndex = loadedTracks
@@ -1205,7 +1361,19 @@ internal fun resolvePlaylistPlaybackRequest(
     return PlaylistPlaybackRequest(
         tracks = loadedTracks,
         startIndex = resolvedIndex,
+        shouldStartPlayback = currentTrackId != clickedTrackId,
     )
+}
+
+internal fun resolvePlaylistCurrentTrackLazyIndex(
+    currentTrackId: Long?,
+    loadedTracks: List<TrackItem>,
+    leadingItemCount: Int,
+): Int? {
+    if (currentTrackId == null || currentTrackId <= 0L) return null
+    val trackIndex = loadedTracks.indexOfFirst { track -> track.id == currentTrackId }
+    if (trackIndex < 0) return null
+    return leadingItemCount + trackIndex
 }
 
 internal fun shouldShowRefreshLoading(
@@ -1215,12 +1383,30 @@ internal fun shouldShowRefreshLoading(
     return showLoading || !hasContent
 }
 
+internal fun shouldStartDiscoveryRefresh(
+    refreshInProgress: Boolean,
+    forceRefresh: Boolean,
+): Boolean {
+    return !refreshInProgress || forceRefresh
+}
+
 private fun DiscoveryHomeUi.hasDiscoveryHomeContent(): Boolean {
     return recommendedPlaylists.isNotEmpty() ||
         newSongs.isNotEmpty() ||
         topArtists.isNotEmpty() ||
         newAlbums.isNotEmpty() ||
         topPlaylists.isNotEmpty()
+}
+
+private fun MyMusicHomeUi.hasMyMusicContent(): Boolean {
+    return currentUser != null ||
+        likedPlaylist != null ||
+        recentTracks.isNotEmpty() ||
+        recentPlaylists.isNotEmpty() ||
+        createdPlaylists.isNotEmpty() ||
+        collectedPlaylists.isNotEmpty() ||
+        albums.isNotEmpty() ||
+        listeningRanks.isNotEmpty()
 }
 
 private fun DiscoveryBrowseUi.hasDiscoveryBrowseContent(): Boolean {
