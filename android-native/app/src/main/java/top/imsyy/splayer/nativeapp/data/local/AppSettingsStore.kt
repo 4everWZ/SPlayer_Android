@@ -14,6 +14,7 @@ import top.imsyy.splayer.nativeapp.AppSettingsProto
 import top.imsyy.splayer.nativeapp.di.ApplicationScope
 import top.imsyy.splayer.nativeapp.model.PlayMode
 import top.imsyy.splayer.nativeapp.model.ThemeMode
+import top.imsyy.splayer.nativeapp.model.UnlockServerMode
 
 private val Context.appSettingsDataStore: DataStore<AppSettingsProto> by dataStore(
     fileName = "app_settings.pb",
@@ -111,6 +112,10 @@ class AppSettingsStore @Inject constructor(
         update { current -> current.toBuilder().setThemeMode(mode.rawValue).build() }
     }
 
+    suspend fun setUnlockServerMode(mode: UnlockServerMode) {
+        update { current -> current.toBuilder().setUnlockServerMode(mode.rawValue).build() }
+    }
+
     fun buildCookieHeader(): String {
         val current = settings.value
         return buildList {
@@ -122,6 +127,9 @@ class AppSettingsStore @Inject constructor(
 
     val apiRoot: String
         get() = settings.value.apiRoot.ifBlank { AppSettingsSerializer.defaultValue.apiRoot }
+
+    val unlockServerMode: UnlockServerMode
+        get() = UnlockServerMode.fromRaw(settings.value.unlockServerMode)
 }
 
 internal fun mergeCookieValue(current: String, incoming: String?): String {

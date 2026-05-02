@@ -33,6 +33,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import top.imsyy.splayer.nativeapp.model.ThemeMode
+import top.imsyy.splayer.nativeapp.model.UnlockServerMode
 import top.imsyy.splayer.nativeapp.ui.SettingsViewModel
 
 @Composable
@@ -165,10 +166,27 @@ fun SettingsScreen(
         item {
             SettingsSectionCard(
                 title = "网络",
-                description = "首阶段固定 remote 模式，和你的 /splayer/* 服务直接对接",
+                description = "默认使用原生本地解锁；选择外部服务器时只走 API 根路径提供的解锁服务",
             ) {
                 Text("模式：${state.appMode}")
                 Text(state.apiRoot, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                SettingsSwitchRow(
+                    title = "使用外部 unlock 服务器",
+                    checked = state.unlockServerMode == UnlockServerMode.EXTERNAL,
+                    onCheckedChange = { enabled ->
+                        viewModel.setUnlockServerMode(
+                            if (enabled) UnlockServerMode.EXTERNAL else UnlockServerMode.LOCAL,
+                        )
+                    },
+                )
+                Text(
+                    if (state.unlockServerMode == UnlockServerMode.EXTERNAL) {
+                        "当前播放源解析会跳过原生本地解锁，只请求外部 /unblock/*。"
+                    } else {
+                        "当前播放源解析优先保留原生本地解锁，不加载桌面本地 unlock 服务。"
+                    },
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
 
@@ -216,6 +234,10 @@ fun SettingsScreen(
             ) {
                 Text("包模式：${state.appMode}")
                 Text("API 根路径：${state.apiRoot}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    "Unlock：${if (state.unlockServerMode == UnlockServerMode.EXTERNAL) "外部服务器" else "原生本地"}",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 Text(
                     "桌面专属项不在 Android 显示。后续会补真机功耗 trace 导出入口。",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,

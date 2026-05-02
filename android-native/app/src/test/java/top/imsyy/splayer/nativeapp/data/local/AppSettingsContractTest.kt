@@ -5,6 +5,7 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 import top.imsyy.splayer.nativeapp.AppSettingsProto
 import top.imsyy.splayer.nativeapp.model.ThemeMode
+import top.imsyy.splayer.nativeapp.model.UnlockServerMode
 import top.imsyy.splayer.nativeapp.ui.toStoredUserOrNull
 
 class AppSettingsContractTest {
@@ -61,5 +62,20 @@ class AppSettingsContractTest {
         assertEquals(ThemeMode.DARK, ThemeMode.fromRaw(-1))
         assertEquals(ThemeMode.DARK, ThemeMode.fromRaw(0))
         assertEquals(ThemeMode.LIGHT, ThemeMode.fromRaw(1))
+    }
+
+    @Test
+    fun `default settings keep unlock server mode local`() {
+        assertEquals(
+            UnlockServerMode.LOCAL,
+            UnlockServerMode.fromRaw(AppSettingsSerializer.defaultValue.unlockServerMode),
+        )
+    }
+
+    @Test
+    fun `unlockServerMode falls back to local when value unknown`() {
+        assertEquals(UnlockServerMode.LOCAL, UnlockServerMode.fromRaw(-1))
+        assertEquals(UnlockServerMode.LOCAL, UnlockServerMode.fromRaw(0))
+        assertEquals(UnlockServerMode.EXTERNAL, UnlockServerMode.fromRaw(1))
     }
 }

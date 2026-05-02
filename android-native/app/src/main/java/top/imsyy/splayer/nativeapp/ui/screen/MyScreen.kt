@@ -41,8 +41,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
@@ -63,10 +61,6 @@ fun MyScreen(
     viewModel: MyViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
-
-    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
-        viewModel.refresh(showLoading = false)
-    }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -240,12 +234,20 @@ private fun MyHeroHeader(
             .height(292.dp)
             .clip(RoundedCornerShape(34.dp)),
     ) {
-        AsyncImage(
-            model = backgroundModel,
-            contentDescription = nickname,
-            modifier = Modifier.fillMaxSize(),
-            contentScale = ContentScale.Crop,
-        )
+        if (heroBackgroundUrl.isNotBlank()) {
+            AsyncImage(
+                model = backgroundModel,
+                contentDescription = nickname,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop,
+            )
+        } else {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.surfaceVariant),
+            )
+        }
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -341,7 +343,7 @@ internal fun resolveMyHeroBackgroundImageUrl(
     avatarUrl: String,
     backgroundUrl: String,
 ): String {
-    return avatarUrl.trim().ifBlank { backgroundUrl.trim() }
+    return avatarUrl.trim()
 }
 
 @Composable

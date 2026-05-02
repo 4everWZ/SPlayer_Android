@@ -248,6 +248,16 @@ class PlayerScreenSupportTest {
     }
 
     @Test
+    fun `my hero background stays blank when avatar is blank`() {
+        val resolved = resolveMyHeroBackgroundImageUrl(
+            avatarUrl = " ",
+            backgroundUrl = "https://example.com/profile-background.jpg",
+        )
+
+        assertEquals("", resolved)
+    }
+
+    @Test
     fun `disc rotation keeps netease style long play cycle`() {
         assertEquals(18_000, DISC_ROTATION_CYCLE_MS)
     }

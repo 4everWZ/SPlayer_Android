@@ -6,6 +6,7 @@ import androidx.lifecycle.SavedStateHandle
 import android.app.Activity
 import android.app.Application
 import android.os.Bundle
+import android.os.SystemClock
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -48,6 +49,7 @@ import top.imsyy.splayer.nativeapp.model.RecommendFeedUi
 import top.imsyy.splayer.nativeapp.model.RadioDetailUi
 import top.imsyy.splayer.nativeapp.model.TrackItem
 import top.imsyy.splayer.nativeapp.model.ThemeMode
+import top.imsyy.splayer.nativeapp.model.UnlockServerMode
 import top.imsyy.splayer.nativeapp.model.UserAccountUi
 import top.imsyy.splayer.nativeapp.player.PlaybackCoordinator
 import top.imsyy.splayer.nativeapp.player.resolveNextPlayMode
@@ -100,6 +102,10 @@ data class HomeUiState(
 
 @Singleton
 class DiscoveryRefreshCoordinator() {
+    private companion object {
+        const val REOPEN_BACKGROUND_THRESHOLD_MS = 5 * 60 * 1000L
+    }
+
     @Inject
     constructor(
         @ApplicationContext context: Context,
@@ -112,6 +118,7 @@ class DiscoveryRefreshCoordinator() {
     private val lock = Mutex()
     private var nextAutomaticForceRefresh = true
     private var startedActivityCount = 0
+    private var lastBackgroundAtMs: Long = 0L
     private var remoteRepository: SPlayerRemoteRepository? = null
 
     private fun registerForegroundCallbacks(context: Context) {
@@ -120,11 +127,16 @@ class DiscoveryRefreshCoordinator() {
                 override fun onActivityStarted(activity: Activity) {
                     val wasBackground = startedActivityCount == 0
                     startedActivityCount += 1
-                    if (wasBackground) markAppForegrounded()
+                    if (wasBackground && shouldRefreshAfterForeground(SystemClock.elapsedRealtime())) {
+                        markAppOpened()
+                    }
                 }
 
                 override fun onActivityStopped(activity: Activity) {
                     startedActivityCount = (startedActivityCount - 1).coerceAtLeast(0)
+                    if (startedActivityCount == 0) {
+                        lastBackgroundAtMs = SystemClock.elapsedRealtime()
+                    }
                 }
 
                 override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) = Unit
@@ -137,7 +149,15 @@ class DiscoveryRefreshCoordinator() {
     }
 
     fun markAppForegrounded() {
+        // 锁屏解锁也会触发前台回调，不能把它当成重新打开应用。
+    }
+
+    fun markAppOpened() {
         nextAutomaticForceRefresh = true
+    }
+
+    fun shouldRefreshAfterForeground(nowMs: Long): Boolean {
+        return lastBackgroundAtMs == 0L || nowMs - lastBackgroundAtMs >= REOPEN_BACKGROUND_THRESHOLD_MS
     }
 
     fun resolveForceRefresh(forceRefresh: Boolean): Boolean {
@@ -1462,6 +1482,7 @@ data class SettingsUiState(
     val showQueueCount: Boolean = true,
     val lyricFontScale: Int = 100,
     val themeMode: ThemeMode = ThemeMode.DARK,
+    val unlockServerMode: UnlockServerMode = UnlockServerMode.LOCAL,
 )
 
 @HiltViewModel
@@ -1489,6 +1510,7 @@ class SettingsViewModel @Inject constructor(
                     showQueueCount = settings.showQueueCount,
                     lyricFontScale = settings.lyricFontScale.coerceIn(85, 135),
                     themeMode = ThemeMode.fromRaw(settings.themeMode),
+                    unlockServerMode = UnlockServerMode.fromRaw(settings.unlockServerMode),
                 )
             }
         }
@@ -1625,6 +1647,12 @@ class SettingsViewModel @Inject constructor(
     fun setThemeMode(mode: ThemeMode) {
         viewModelScope.launch {
             appSettingsStore.setThemeMode(mode)
+        }
+    }
+
+    fun setUnlockServerMode(mode: UnlockServerMode) {
+        viewModelScope.launch {
+            appSettingsStore.setUnlockServerMode(mode)
         }
     }
 

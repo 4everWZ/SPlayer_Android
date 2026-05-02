@@ -36,7 +36,9 @@
 
 ## 服务前提
 
-- 远程 `/splayer/*` 服务已承担解锁版本能力
+- Android 不启动桌面端 Node/Electron 本地 unlock 服务
+- 默认 `unlockServerMode=LOCAL`，由 Android 原生网络请求按需解析网易云直连解锁候选
+- 用户选择外部服务器时切到 `unlockServerMode=EXTERNAL`，只请求当前 `API_ROOT` 下的 `/unblock/*`
 - 客户端不得再叠加会员可用性判断、广告解锁判断或 VIP 导流逻辑
 - 即便远程服务具备解锁能力，客户端仍要保留官方源与多解锁源故障转移链
 
@@ -95,13 +97,15 @@
 - `netease/top/artists?limit=12`
 - `netease/album/new`
 - `netease/toplist/detail`
+- `netease/homepage/block/page?refresh=true`，仅 `forceRefresh=true` 时请求，成功时优先承接推荐歌单、推荐歌曲和新碟块
 
 ### 刷新策略
 
 - 普通页面进入优先使用 30 分钟内的内存缓存
-- 冷启动或 App 从后台回前台后，同一前台周期只允许一次自动强刷
+- 冷启动或 App 被系统重建后允许一次自动强刷；锁屏解锁、底部 tab 切换和短时间回前台不得触发自动强刷
 - 手动刷新必须走 `forceRefresh=true`
 - `forceRefresh=true` 必须绕过本地缓存，并给推荐相关请求附加 `timestamp`
+- `homepage/block/page` 失败或返回空块时必须回退到 desktop 当前稳定接口组合，不能让推荐页空白
 - Home 和 Discovery 之间切换不得重复触发强刷
 - 已有内容时不显示整屏下拉刷新动画，只允许局部刷新状态
 
@@ -110,7 +114,7 @@
 ### 请求链
 
 1. `netease/login/status`
-2. `netease/user/account`，仅在登录状态没有可用 profile 时兜底
+2. `netease/user/account`
 3. `netease/user/detail?uid={userId}&timestamp={now}`
 4. `netease/likelist?uid={userId}`
 5. `netease/user/playlist?uid={userId}&limit=20&offset=0`
@@ -119,12 +123,12 @@
 
 ### 字段合同
 
-- `user/detail.profile` 仍是昵称、签名、等级、关注数、粉丝数、听歌数的主来源
+- `user/detail.profile` 仍补充昵称、签名、等级、关注数、粉丝数、听歌数
 - 背景字段按 `backgroundUrl -> backgroundImageUrl -> profileBackgroundUrl` 解析，作为资料字段保留
-- 当前已验证 `backgroundUrl` 可能长期返回旧个人主页背景，不能作为“我的”页头图区唯一真值
-- “我的”页头图区背景图优先使用已更新的 `avatarUrl`，仅在头像为空时回退到背景字段
+- “我的”页头图区背景按当前用户要求直接使用 `avatarUrl`
+- 资料背景字段当前不作为头图区真值，避免继续显示网易云接口返回的旧背景
 - 头图区图片缓存 key 只由实际图片 URL 生成，不得用刷新时间戳或轮询版本号强制失效
-- 只有远程返回的头像 URL 或回退背景 URL 发生变化时，图片层才应重新加载
+- 只有头像 URL 发生变化时，头图区图片层才应重新加载
 
 ## 音源解析
 
@@ -138,7 +142,11 @@
 
 ### 解锁源
 
-按顺序尝试：
+`unlockServerMode=LOCAL`：
+
+1. `native-netease`，Android 原生按需请求 `https://music-api.gdstudio.xyz/api.php`
+
+`unlockServerMode=EXTERNAL`：
 
 1. `unblock/netease`
 2. `unblock/kuwo`
@@ -158,6 +166,6 @@
 
 ## 当前边界
 
-- 首阶段不内置本地 API runtime
+- 首阶段不内置 Node/Electron 本地 API runtime；本地 unlock 只保留 Android 原生按需网络解析
 - 播客相关仓储仍保留在仓库中，但不属于当前听歌主线
 - `qqmusic` 端点尚未在 UI 首批功能中消费，但接口根路径已保留

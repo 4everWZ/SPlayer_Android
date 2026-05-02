@@ -15,9 +15,21 @@ class ViewModelSupportTest {
         assertEquals(true, coordinator.resolveForceRefresh(forceRefresh = false))
         assertEquals(false, coordinator.resolveForceRefresh(forceRefresh = false))
 
-        coordinator.markAppForegrounded()
+        coordinator.markAppOpened()
 
         assertEquals(true, coordinator.resolveForceRefresh(forceRefresh = false))
+        assertEquals(false, coordinator.resolveForceRefresh(forceRefresh = false))
+    }
+
+    @Test
+    fun `discovery refresh coordinator ignores lock screen foreground transitions`() {
+        val coordinator = DiscoveryRefreshCoordinator()
+
+        assertEquals(true, coordinator.resolveForceRefresh(forceRefresh = false))
+        assertEquals(false, coordinator.resolveForceRefresh(forceRefresh = false))
+
+        coordinator.markAppForegrounded()
+
         assertEquals(false, coordinator.resolveForceRefresh(forceRefresh = false))
     }
 

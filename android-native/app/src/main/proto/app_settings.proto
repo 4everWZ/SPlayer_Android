@@ -18,4 +18,5 @@ message AppSettingsProto {
   int32 lyric_font_scale = 12;
   string account_avatar_url = 13;
   int32 theme_mode = 14;
+  int32 unlock_server_mode = 15;
 }

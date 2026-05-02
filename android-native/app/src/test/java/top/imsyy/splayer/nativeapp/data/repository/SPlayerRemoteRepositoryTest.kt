@@ -410,6 +410,61 @@ class SPlayerRemoteRepositoryTest {
     }
 
     @Test
+    fun `fetchMyMusicHome prefers account background over stale user detail background`() = runBlocking {
+        val repository = SPlayerRemoteRepository(
+            api = FakeApiService(
+                responses = mapOf(
+                    "netease/login/status" to """
+                        {
+                          "data": {
+                            "account": { "id": 9001 },
+                            "profile": {
+                              "userId": 9001,
+                              "nickname": "原生用户",
+                              "avatarUrl": "https://example.com/u.jpg",
+                              "backgroundUrl": "https://example.com/login-bg.jpg"
+                            }
+                          }
+                        }
+                    """.trimIndent(),
+                    "netease/user/account" to """
+                        {
+                          "profile": {
+                            "userId": 9001,
+                            "nickname": "原生用户",
+                            "avatarUrl": "https://example.com/u.jpg",
+                            "backgroundUrl": "https://example.com/fresh-account-bg.jpg"
+                          }
+                        }
+                    """.trimIndent(),
+                    "netease/user/detail" to """
+                        {
+                          "level": 9,
+                          "listenSongs": 16808,
+                          "profile": {
+                            "userId": 9001,
+                            "nickname": "原生用户",
+                            "avatarUrl": "https://example.com/u.jpg",
+                            "backgroundUrl": "https://example.com/stale-detail-bg.jpg"
+                          }
+                        }
+                    """.trimIndent(),
+                    "netease/likelist" to """{"ids": [1, 2, 3]}""",
+                    "netease/user/playlist" to """{"playlist": []}""",
+                    "netease/album/sublist" to """{"data": []}""",
+                    "netease/user/record" to """{"weekData": []}""",
+                ),
+            ),
+        )
+
+        val result = repository.fetchMyMusicHome(recentTracks = emptyList())
+
+        assertEquals("https://example.com/fresh-account-bg.jpg", result.currentUser?.backgroundUrl)
+        assertEquals(9, result.currentUser?.level)
+        assertEquals(16808, result.currentUser?.listenCount)
+    }
+
+    @Test
     fun `fetchLikedPlaylistId returns current users liked playlist`() = runBlocking {
         val api = FakeApiService(
             responses = mapOf(
@@ -485,6 +540,43 @@ class SPlayerRemoteRepositoryTest {
         assertEquals("netease/playmode/intelligence/list", call.url)
         assertEquals("2001", call.params["id"])
         assertEquals("1001", call.params["pid"])
+    }
+
+    @Test
+    fun `resolveSongSource uses native direct netease unlock without remote unblock request`() = runBlocking {
+        val api = FakeApiService(
+            responses = mapOf(
+                "netease/song/url/v1" to """{"data":[{"url":null}]}""",
+                "https://music-api.gdstudio.xyz/api.php" to """
+                    {
+                      "url": "http://m801.music.126.net/direct.mp3",
+                      "br": 320000
+                    }
+                """.trimIndent(),
+            ),
+        )
+        val repository = SPlayerRemoteRepository(api = api)
+
+        val source = repository.resolveSongSource(
+            track = TrackItem(
+                id = 909L,
+                name = "测试歌曲",
+                artists = "测试歌手",
+                album = "测试专辑",
+                coverUrl = "",
+                durationMs = 180_000L,
+            ),
+            tryOfficial = true,
+            enabledUnlockServers = listOf("native-netease"),
+        )
+
+        assertEquals("https://m801.music.126.net/direct.mp3", source.url)
+        assertEquals("native-netease", source.source)
+        assertTrue(source.unlocked)
+        assertFalse(api.calls.any { it.url.startsWith("unblock/") })
+        val directCall = api.calls.first { it.url == "https://music-api.gdstudio.xyz/api.php" }
+        assertEquals("url", directCall.params["types"])
+        assertEquals("909", directCall.params["id"])
     }
 
     @Test
@@ -1594,10 +1686,11 @@ class SPlayerRemoteRepositoryTest {
         repository.fetchDiscoveryHome()
         repository.fetchDiscoveryHome(forceRefresh = true)
 
-        assertEquals(12, api.calls.size)
+        assertEquals(13, api.calls.size)
         val forceCalls = api.calls.drop(6)
         assertEquals(
             listOf(
+                "netease/homepage/block/page",
                 "netease/personalized",
                 "netease/recommend/songs",
                 "netease/top/song",
@@ -1610,6 +1703,97 @@ class SPlayerRemoteRepositoryTest {
         forceCalls.forEach { call ->
             assertTrue("missing timestamp for ${call.url}", call.params["timestamp"].orEmpty().isNotBlank())
         }
+        val blockPageCall = forceCalls.single { it.url == "netease/homepage/block/page" }
+        assertEquals("true", blockPageCall.params["refresh"])
+    }
+
+    @Test
+    fun `fetchDiscoveryHome force refresh uses homepage block page recommendations when available`() = runBlocking {
+        val repository = SPlayerRemoteRepository(
+            api = FakeApiService(
+                responses = discoveryHomeResponses() + mapOf(
+                    "netease/homepage/block/page" to """
+                        {
+                          "code": 200,
+                          "data": {
+                            "blocks": [
+                              {
+                                "blockCode": "HOMEPAGE_BLOCK_PLAYLIST_RCMD",
+                                "creatives": [
+                                  {
+                                    "resources": [
+                                      {
+                                        "resourceType": "playlist",
+                                        "resourceId": "2001",
+                                        "uiElement": {
+                                          "mainTitle": { "title": "刷新歌单一" },
+                                          "image": { "imageUrl": "https://example.com/fresh-playlist.jpg" }
+                                        },
+                                        "resourceExtInfo": { "playCount": 18 }
+                                      }
+                                    ]
+                                  }
+                                ]
+                              },
+                              {
+                                "blockCode": "HOMEPAGE_BLOCK_STYLE_RCMD",
+                                "creatives": [
+                                  {
+                                    "resources": [
+                                      {
+                                        "resourceType": "song",
+                                        "resourceId": "3001",
+                                        "resourceExtInfo": {
+                                          "songData": {
+                                            "id": 3001,
+                                            "name": "刷新歌曲一",
+                                            "dt": 201000,
+                                            "ar": [{ "name": "刷新歌手" }],
+                                            "al": {
+                                              "name": "刷新专辑",
+                                              "picUrl": "https://example.com/fresh-song.jpg"
+                                            }
+                                          }
+                                        }
+                                      }
+                                    ]
+                                  }
+                                ]
+                              },
+                              {
+                                "blockCode": "HOMEPAGE_BLOCK_NEW_ALBUM_NEW_SONG",
+                                "creatives": [
+                                  {
+                                    "creativeType": "NEW_ALBUM_HOMEPAGE",
+                                    "resources": [
+                                      {
+                                        "resourceType": "album",
+                                        "resourceId": "4001",
+                                        "uiElement": {
+                                          "mainTitle": { "title": "刷新专辑一" },
+                                          "subTitle": { "title": "刷新专辑歌手" },
+                                          "image": { "imageUrl": "https://example.com/fresh-album.jpg" }
+                                        },
+                                        "resourceExtInfo": { "songCount": 9 }
+                                      }
+                                    ]
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        }
+                    """.trimIndent(),
+                ),
+            ),
+        )
+
+        val result = repository.fetchDiscoveryHome(forceRefresh = true)
+
+        assertEquals("刷新歌单一", result.recommendedPlaylists.first().name)
+        assertEquals("刷新歌曲一", result.dailySongs.first().name)
+        assertEquals("刷新歌曲一", result.newSongs.first().name)
+        assertEquals("刷新专辑一", result.newAlbums.first().name)
     }
 
     @Test

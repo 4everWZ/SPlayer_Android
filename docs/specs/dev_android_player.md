@@ -20,7 +20,7 @@
 
 ## 音源链路
 
-当前前提是远程 `/splayer/*` 服务已经返回解锁版本能力；客户端仍需保留故障转移链，不能假设单一源永久可用。
+客户端保留故障转移链，不能假设单一源永久可用。Android 不启动桌面端 Node/Electron 本地 unlock 服务。
 
 ### 官方源
 
@@ -32,7 +32,11 @@
 
 ### 解锁源
 
-按顺序尝试：
+`unlockServerMode=LOCAL` 为默认模式，按需走 Android 原生网络解析：
+
+1. `native-netease`
+
+`unlockServerMode=EXTERNAL` 为外部服务器模式，按顺序尝试：
 
 1. `unblock/netease`
 2. `unblock/kuwo`
@@ -129,6 +133,7 @@
 
 - 前台播放服务崩溃：已修复
 - 官方源与解锁源分离：已实现
+- Unlock 模式切换：已实现，默认原生本地，外部模式只走远程 `/unblock/*`
 - 失败音源记忆：已实现
 - 动态重试上限：已实现
 - 模拟器坏解码器过滤：已实现

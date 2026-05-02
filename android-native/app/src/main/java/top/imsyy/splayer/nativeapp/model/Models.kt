@@ -256,6 +256,15 @@ enum class ThemeMode(val rawValue: Int) {
     }
 }
 
+enum class UnlockServerMode(val rawValue: Int) {
+    LOCAL(0),
+    EXTERNAL(1);
+
+    companion object {
+        fun fromRaw(rawValue: Int): UnlockServerMode = entries.firstOrNull { it.rawValue == rawValue } ?: LOCAL
+    }
+}
+
 data class TrackSource(
     val url: String,
     val quality: String?,

@@ -56,6 +56,12 @@
 
 ## AT-010
 
-- 主题：我的页头图不再把 `user/detail.backgroundUrl` 当唯一真值
-- 原因：真机账号验证中，`login/status`、`user/account`、`user/detail` 与 `user/detail/new` 均会返回旧背景图，但头像 URL 已更新并与网易云 App 当前个人卡片视觉一致
-- 影响：Native V2 的“我的”页头图背景优先使用头像 URL，背景字段只作为头像为空时的回退；图片缓存按实际 URL 失效，不按刷新时间戳或轮询版本号失效
+- 主题：我的页头图直接使用头像 URL
+- 原因：公开资料接口长期返回旧背景图，用户最终确认可以直接用头像作为个人卡片背景，避免继续追逐不可用背景 API
+- 影响：Native V2 的“我的”页头图背景和圆形头像使用同一头像 URL；资料背景字段保留但不驱动头图区；图片缓存按实际头像 URL 失效，不按刷新时间戳或轮询版本号失效
+
+## AT-011
+
+- 主题：Android unlock 默认使用原生按需解析
+- 原因：移动端不应为了默认播放链启动桌面端 Node/Electron 本地 unlock 服务，避免额外常驻进程和功耗
+- 影响：默认 `unlockServerMode=LOCAL` 只启用 `native-netease`；选择外部服务器后才请求 `API_ROOT/unblock/*` 的 `netease / kuwo / gequbao / bodian` 候选；失败音源记忆仍按当前模式过滤

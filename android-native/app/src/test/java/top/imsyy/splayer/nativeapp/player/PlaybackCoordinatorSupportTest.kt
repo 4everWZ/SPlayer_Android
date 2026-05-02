@@ -7,6 +7,7 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 import top.imsyy.splayer.nativeapp.model.PlayMode
 import top.imsyy.splayer.nativeapp.model.TrackItem
+import top.imsyy.splayer.nativeapp.model.UnlockServerMode
 
 class PlaybackCoordinatorSupportTest {
     @Test
@@ -457,6 +458,26 @@ class PlaybackCoordinatorSupportTest {
         assertEquals(first, second)
         assertEquals(1, first.queueCount)
         assertEquals("测试歌曲", first.currentTrack?.name)
+    }
+
+    @Test
+    fun `resolveEnabledUnlockServers uses native direct candidate in local mode`() {
+        val servers = resolveEnabledUnlockServers(
+            mode = UnlockServerMode.LOCAL,
+            failedSources = emptySet(),
+        )
+
+        assertEquals(listOf(LOCAL_NETEASE_UNLOCK_SOURCE), servers)
+    }
+
+    @Test
+    fun `resolveEnabledUnlockServers uses remote unblock candidates only in external mode`() {
+        val servers = resolveEnabledUnlockServers(
+            mode = UnlockServerMode.EXTERNAL,
+            failedSources = setOf("kuwo"),
+        )
+
+        assertEquals(listOf("netease", "gequbao", "bodian"), servers)
     }
 }
 

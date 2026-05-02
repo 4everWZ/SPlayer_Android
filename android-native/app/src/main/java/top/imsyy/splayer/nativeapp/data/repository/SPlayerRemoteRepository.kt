@@ -79,6 +79,8 @@ class SPlayerRemoteRepository @Inject constructor(
     private val playlistDetailCacheDao: PlaylistDetailCacheDao? = null,
 ) {
     private companion object {
+        const val DIRECT_NETEASE_UNLOCK_BASE_URL = "https://music-api.gdstudio.xyz/api.php"
+        const val NATIVE_NETEASE_UNLOCK_SOURCE = "native-netease"
         const val PLAYLIST_PREVIEW_SIZE = 20
         const val PLAYLIST_INITIAL_PAGE_SIZE = 80
         const val PLAYLIST_PAGE_SIZE = 500
@@ -173,11 +175,10 @@ class SPlayerRemoteRepository @Inject constructor(
     suspend fun fetchLoginState(): UserAccountUi? {
         val result = getNetease("login/status")
         val data = result.obj("data")
-        val accountUser = data.obj("account").toUserAccount(profile = data.obj("profile"))
+        val loginUser = data.obj("account").toUserAccount(profile = data.obj("profile"))
+        val accountUser = runCatching { getNetease("user/account").obj("profile").toUserAccount() }.getOrNull()
         if (accountUser != null) return accountUser
-
-        val profileUser = getNetease("user/account").obj("profile").toUserAccount()
-        if (profileUser != null) return profileUser
+        if (loginUser != null) return loginUser
 
         return null
     }
@@ -222,6 +223,18 @@ class SPlayerRemoteRepository @Inject constructor(
         }
         return supervisorScope {
             val timestampParam = if (forceRefresh) mapOf("timestamp" to now()) else emptyMap()
+            val homepageBlockResponse = async {
+                if (forceRefresh) {
+                    runCatching {
+                        getNetease(
+                            "homepage/block/page",
+                            mapOf("refresh" to "true") + timestampParam,
+                        )
+                    }.getOrNull()
+                } else {
+                    null
+                }
+            }
             val playlistResponse = async { getNetease("personalized", mapOf("limit" to "12") + timestampParam) }
             val dailySongResponse = async {
                 runCatching { getNetease("recommend/songs", timestampParam) }.getOrNull()
@@ -237,12 +250,15 @@ class SPlayerRemoteRepository @Inject constructor(
                 ?.mapNotNull { it.toTrackItem() }
                 .orEmpty()
                 .ifEmpty { newSongs }
+            val blockDiscoveryHome = homepageBlockResponse.await()?.toDiscoveryHomeUi()
             DiscoveryHomeUi(
-                recommendedPlaylists = playlistResponse.await().array("result").mapNotNull { it.toPlaylistItem() },
-                dailySongs = dailySongs,
-                newSongs = newSongs,
+                recommendedPlaylists = blockDiscoveryHome?.recommendedPlaylists.orEmpty()
+                    .ifEmpty { playlistResponse.await().array("result").mapNotNull { it.toPlaylistItem() } },
+                dailySongs = blockDiscoveryHome?.dailySongs.orEmpty().ifEmpty { dailySongs },
+                newSongs = blockDiscoveryHome?.newSongs.orEmpty().ifEmpty { newSongs },
                 topArtists = artistResponse.await().array("artists").mapNotNull { it.toArtistItem() },
-                newAlbums = albumResponse.await().array("albums").mapNotNull { it.toAlbumItem() },
+                newAlbums = blockDiscoveryHome?.newAlbums.orEmpty()
+                    .ifEmpty { albumResponse.await().array("albums").mapNotNull { it.toAlbumItem() } },
                 topPlaylists = toplistResponse.await().array("list").mapNotNull { it.toPlaylistItem() }.take(6),
             )
         }.also { discoveryHome ->
@@ -375,11 +391,15 @@ class SPlayerRemoteRepository @Inject constructor(
                 }.getOrNull()
             }
             val profilePayload = profile.await()
-            val profileUser = profilePayload.obj("profile").toUserAccount().let { user ->
-                if (user == null) {
+            val profileUser = profilePayload.obj("profile").toUserAccount().let { detailUser ->
+                if (detailUser == null) {
                     currentUser
                 } else {
-                    user.copy(
+                    currentUser.copy(
+                        nickname = detailUser.nickname.ifBlank { currentUser.nickname },
+                        avatarUrl = detailUser.avatarUrl.ifBlank { currentUser.avatarUrl },
+                        backgroundUrl = currentUser.backgroundUrl.ifBlank { detailUser.backgroundUrl },
+                        signature = detailUser.signature.ifBlank { currentUser.signature },
                         level = profilePayload.int("level"),
                         followCount = profilePayload.obj("profile").int("follows"),
                         followerCount = profilePayload.obj("profile").int("followeds"),
@@ -716,19 +736,23 @@ class SPlayerRemoteRepository @Inject constructor(
         }
 
         for (server in enabledUnlockServers) {
-            val result = getUnblock(
-                server = server,
-                params = if (server == "netease") {
-                    mapOf("id" to track.id.toString(), "noCookie" to "true")
-                } else {
-                    mapOf(
-                        "keyword" to track.keyword,
-                        "songName" to track.name,
-                        "artist" to track.artists,
-                        "noCookie" to "true",
-                    )
-                },
-            )
+            val result = if (server == NATIVE_NETEASE_UNLOCK_SOURCE) {
+                getDirectNeteaseUnlock(track.id)
+            } else {
+                getUnblock(
+                    server = server,
+                    params = if (server == "netease") {
+                        mapOf("id" to track.id.toString(), "noCookie" to "true")
+                    } else {
+                        mapOf(
+                            "keyword" to track.keyword,
+                            "songName" to track.name,
+                            "artist" to track.artists,
+                            "noCookie" to "true",
+                        )
+                    },
+                )
+            }
             val url = normalizeUrl(result.string("url"))
             if (url.isNotBlank()) {
                 return TrackSource(
@@ -741,6 +765,18 @@ class SPlayerRemoteRepository @Inject constructor(
         }
 
         error("AUDIO_SOURCE_EMPTY")
+    }
+
+    private suspend fun getDirectNeteaseUnlock(trackId: Long): JsonObject {
+        val body = getRaw(
+            DIRECT_NETEASE_UNLOCK_BASE_URL,
+            mapOf(
+                "types" to "url",
+                "id" to trackId.toString(),
+                "noCookie" to "true",
+            ),
+        )
+        return parseJsonObjectBody(body)
     }
 
     private suspend fun getNetease(path: String, params: Map<String, String> = emptyMap()): JsonObject {
@@ -875,29 +911,9 @@ class SPlayerRemoteRepository @Inject constructor(
         )
     }
 
-private fun JsonElement.toTrackItem(): TrackItem? {
-    val root = obj
-    val song = root.obj("simpleSong").takeIf { it.isNotEmpty() }
-        ?: root.obj("songInfo").takeIf { it.isNotEmpty() }
-        ?: root
-    val id = song.long("id")
-    if (id <= 0L) return null
-    val album = song.obj("al").takeIf { it.isNotEmpty() }
-        ?: song.obj("album").takeIf { it.isNotEmpty() }
-        ?: JsonObject(emptyMap())
-    val artists = song.array("ar").joinToString(" / ") { artist -> artist.obj.string("name") }
-        .ifBlank { song.array("artists").joinToString(" / ") { artist -> artist.obj.string("name") } }
-    val duration = song.long("dt").takeIf { it > 0L } ?: song.long("duration")
-    return TrackItem(
-        id = id,
-        name = song.string("name"),
-        artists = artists,
-        album = album.string("name"),
-        coverUrl = album.string("picUrl"),
-        durationMs = duration,
-        keyword = listOf(song.string("name"), artists).filter { it.isNotBlank() }.joinToString(" "),
-    )
-}
+    private fun JsonElement.toTrackItem(): TrackItem? {
+        return obj.toTrackItemFromSong()
+    }
 
     private fun parseLyric(
         primaryLyric: String,
@@ -1445,6 +1461,105 @@ internal fun stripLeadingAndTrailingLyricMetadata(
 
 private fun sanitizeLyricLines(lines: List<LyricLineUi>): List<LyricLineUi> {
     return stripLeadingAndTrailingLyricMetadata(lines)
+}
+
+private fun JsonObject.toTrackItemFromSong(): TrackItem? {
+    val song = obj("simpleSong").takeIf { it.isNotEmpty() }
+        ?: obj("songInfo").takeIf { it.isNotEmpty() }
+        ?: this
+    val id = song.long("id")
+    if (id <= 0L) return null
+    val album = song.obj("al").takeIf { it.isNotEmpty() }
+        ?: song.obj("album").takeIf { it.isNotEmpty() }
+        ?: JsonObject(emptyMap())
+    val artists = song.array("ar").joinToString(" / ") { artist -> artist.obj.string("name") }
+        .ifBlank { song.array("artists").joinToString(" / ") { artist -> artist.obj.string("name") } }
+    val duration = song.long("dt").takeIf { it > 0L } ?: song.long("duration")
+    return TrackItem(
+        id = id,
+        name = song.string("name"),
+        artists = artists,
+        album = album.string("name"),
+        coverUrl = album.string("picUrl"),
+        durationMs = duration,
+        keyword = listOf(song.string("name"), artists).filter { it.isNotBlank() }.joinToString(" "),
+    )
+}
+
+private fun JsonObject.toDiscoveryHomeUi(): DiscoveryHomeUi {
+    val resources = obj("data")
+        .array("blocks")
+        .flatMap { block -> block.obj.array("creatives") }
+        .flatMap { creative -> creative.obj.array("resources") }
+    val playlists = resources.mapNotNull { resource -> resource.toHomepagePlaylistItem() }
+    val songs = resources.mapNotNull { resource -> resource.toHomepageTrackItem() }
+    val albums = resources.mapNotNull { resource -> resource.toHomepageAlbumItem() }
+    return DiscoveryHomeUi(
+        recommendedPlaylists = playlists.distinctBy { playlist -> playlist.id }.take(12),
+        dailySongs = songs.distinctBy { track -> track.id }.take(12),
+        newSongs = songs.distinctBy { track -> track.id }.take(24),
+        newAlbums = albums.distinctBy { album -> album.id }.take(12),
+    )
+}
+
+private fun JsonElement.toHomepagePlaylistItem(): PlaylistItem? {
+    val resource = obj
+    val type = resource.string("resourceType").lowercase()
+    if (type.isNotBlank() && !type.contains("playlist")) return null
+    val uiElement = resource.obj("uiElement")
+    val id = resource.long("resourceId").takeIf { it > 0L } ?: resource.long("id")
+    val name = resource.string("name")
+        .ifBlank { uiElement.obj("mainTitle").string("title") }
+        .ifBlank { uiElement.string("mainTitle") }
+    if (id <= 0L || name.isBlank()) return null
+    val ext = resource.obj("resourceExtInfo")
+    return PlaylistItem(
+        id = id,
+        name = name,
+        coverUrl = resource.string("picUrl")
+            .ifBlank { resource.string("coverImgUrl") }
+            .ifBlank { uiElement.obj("image").string("imageUrl") },
+        trackCount = resource.int("trackCount").takeIf { it > 0 }
+            ?: resource.int("songCount").takeIf { it > 0 }
+            ?: ext.int("songCount").takeIf { it > 0 }
+            ?: ext.int("trackCount"),
+    )
+}
+
+private fun JsonElement.toHomepageTrackItem(): TrackItem? {
+    val resource = obj
+    val type = resource.string("resourceType").lowercase()
+    if (type.isNotBlank() && !type.contains("song")) return null
+    val ext = resource.obj("resourceExtInfo")
+    val song = ext.obj("songData").takeIf { it.isNotEmpty() }
+        ?: ext.obj("song").takeIf { it.isNotEmpty() }
+        ?: resource.obj("songData").takeIf { it.isNotEmpty() }
+        ?: resource.obj("songInfo").takeIf { it.isNotEmpty() }
+        ?: resource
+    return song.toTrackItemFromSong()
+}
+
+private fun JsonElement.toHomepageAlbumItem(): AlbumItem? {
+    val resource = obj
+    val type = resource.string("resourceType").lowercase()
+    if (type.isNotBlank() && !type.contains("album")) return null
+    val uiElement = resource.obj("uiElement")
+    val ext = resource.obj("resourceExtInfo")
+    val id = resource.long("resourceId").takeIf { it > 0L } ?: resource.long("id")
+    val name = resource.string("name")
+        .ifBlank { uiElement.obj("mainTitle").string("title") }
+        .ifBlank { uiElement.string("mainTitle") }
+    if (id <= 0L || name.isBlank()) return null
+    val artistName = resource.obj("artist").string("name")
+        .ifBlank { uiElement.obj("subTitle").string("title") }
+        .ifBlank { uiElement.string("subTitle") }
+    return AlbumItem(
+        id = id,
+        name = name,
+        coverUrl = resource.string("picUrl").ifBlank { uiElement.obj("image").string("imageUrl") },
+        artistName = artistName,
+        trackCount = resource.int("size").takeIf { it > 0 } ?: ext.int("songCount"),
+    )
 }
 
 private fun JsonElement.toPlaylistItem(): PlaylistItem? {
