@@ -28,8 +28,20 @@ jobs:
         working-directory: android-native
         run: ./gradlew testDebugUnitTest assembleDebug --no-daemon --console=plain
 
+      - name: Generate APK version
+        id: apk-version
+        shell: bash
+        run: |
+          base_version=$(node -p "require('./package.json').version.split('-')[0]")
+          short_sha="${GITHUB_SHA::7}"
+          version="${base_version}+native.${GITHUB_RUN_NUMBER}.${short_sha}"
+          apk_name="splayer-native-v2-debug-${version}.apk"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "apk_name=${apk_name}" >> "$GITHUB_OUTPUT"
+          cp android-native/app/build/outputs/apk/debug/app-debug.apk "${apk_name}"
+
       - name: Upload native APK
         uses: actions/upload-artifact@v4
         with:
-          name: splayer-native-v2-debug-apk
-          path: android-native/app/build/outputs/apk/debug/app-debug.apk
+          name: splayer-native-v2-debug-${{ steps.apk-version.outputs.version }}
+          path: ${{ steps.apk-version.outputs.apk_name }}
