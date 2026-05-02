@@ -23,7 +23,7 @@
 - 二维码登录
 - 推荐歌单
 - 发现页频道数据
-- 我的页歌单与喜欢的音乐摘要
+- 我的页账号资料、歌单与喜欢的音乐摘要
 - 歌单详情
 - 搜索默认词
 - 热搜
@@ -82,6 +82,49 @@
 - `login/status` 必须允许短时重试
 - 若首轮拉取为空，不得立即把 UI 回退成未登录
 - 账户信息以持久层和远程状态共同收敛
+
+## 推荐页刷新合同
+
+推荐页和发现页共用 `DiscoveryHomeUi` 数据源，避免两个页面各自持有旧缓存。
+
+### 数据来源
+
+- `netease/personalized?limit=12`
+- `netease/recommend/songs`
+- `netease/top/song?type=0`
+- `netease/top/artists?limit=12`
+- `netease/album/new`
+- `netease/toplist/detail`
+
+### 刷新策略
+
+- 普通页面进入优先使用 30 分钟内的内存缓存
+- 冷启动或 App 从后台回前台后，同一前台周期只允许一次自动强刷
+- 手动刷新必须走 `forceRefresh=true`
+- `forceRefresh=true` 必须绕过本地缓存，并给推荐相关请求附加 `timestamp`
+- Home 和 Discovery 之间切换不得重复触发强刷
+- 已有内容时不显示整屏下拉刷新动画，只允许局部刷新状态
+
+## 我的页资料合同
+
+### 请求链
+
+1. `netease/login/status`
+2. `netease/user/account`，仅在登录状态没有可用 profile 时兜底
+3. `netease/user/detail?uid={userId}&timestamp={now}`
+4. `netease/likelist?uid={userId}`
+5. `netease/user/playlist?uid={userId}&limit=20&offset=0`
+6. `netease/album/sublist?limit=20&offset=0&timestamp={now}`
+7. `netease/user/record?uid={userId}&type=1&timestamp={now}`，失败时允许静默降级为空
+
+### 字段合同
+
+- `user/detail.profile` 仍是昵称、签名、等级、关注数、粉丝数、听歌数的主来源
+- 背景字段按 `backgroundUrl -> backgroundImageUrl -> profileBackgroundUrl` 解析，作为资料字段保留
+- 当前已验证 `backgroundUrl` 可能长期返回旧个人主页背景，不能作为“我的”页头图区唯一真值
+- “我的”页头图区背景图优先使用已更新的 `avatarUrl`，仅在头像为空时回退到背景字段
+- 头图区图片缓存 key 只由实际图片 URL 生成，不得用刷新时间戳或轮询版本号强制失效
+- 只有远程返回的头像 URL 或回退背景 URL 发生变化时，图片层才应重新加载
 
 ## 音源解析
 
