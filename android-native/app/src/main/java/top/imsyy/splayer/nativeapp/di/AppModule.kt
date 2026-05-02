@@ -2,6 +2,8 @@ package top.imsyy.splayer.nativeapp.di
 
 import android.content.Context
 import androidx.room.Room
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -28,6 +30,27 @@ annotation class ApplicationScope
 @Module
 @InstallIn(SingletonComponent::class)
 object AppModule {
+    private val MIGRATION_1_2 = object : Migration(1, 2) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS `playlist_detail_cache` (
+                    `playlistId` INTEGER NOT NULL,
+                    `name` TEXT NOT NULL,
+                    `coverUrl` TEXT NOT NULL,
+                    `description` TEXT NOT NULL,
+                    `playCount` INTEGER NOT NULL,
+                    `subscribedCount` INTEGER NOT NULL,
+                    `trackCount` INTEGER NOT NULL,
+                    `tracksJson` TEXT NOT NULL,
+                    `cachedAt` INTEGER NOT NULL,
+                    PRIMARY KEY(`playlistId`)
+                )
+                """.trimIndent(),
+            )
+        }
+    }
+
     @Provides
     @Singleton
     @ApplicationScope
@@ -36,7 +59,9 @@ object AppModule {
     @Provides
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): SPlayerDatabase {
-        return Room.databaseBuilder(context, SPlayerDatabase::class.java, "splayer_native.db").build()
+        return Room.databaseBuilder(context, SPlayerDatabase::class.java, "splayer_native.db")
+            .addMigrations(MIGRATION_1_2)
+            .build()
     }
 
     @Provides
@@ -47,6 +72,9 @@ object AppModule {
 
     @Provides
     fun provideFailedSourceDao(database: SPlayerDatabase) = database.failedSourceDao()
+
+    @Provides
+    fun providePlaylistDetailCacheDao(database: SPlayerDatabase) = database.playlistDetailCacheDao()
 
     @Provides
     @Singleton

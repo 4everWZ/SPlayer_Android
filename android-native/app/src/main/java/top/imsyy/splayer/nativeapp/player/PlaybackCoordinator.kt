@@ -2,8 +2,10 @@ package top.imsyy.splayer.nativeapp.player
 
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.os.SystemClock
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.DefaultRenderersFactory
@@ -120,10 +122,27 @@ internal fun shouldTriggerStallRecovery(
     return isBuffering && noProgressDurationMs >= stallTimeoutMs
 }
 
-internal fun resolvePlaybackEndTargetIndex(
+internal data class SystemMediaTransportAvailability(
+    val previousAvailable: Boolean,
+    val nextAvailable: Boolean,
+)
+
+internal fun resolveSystemMediaTransportAvailability(
+    queueSize: Int,
+    currentIndex: Int,
+): SystemMediaTransportAvailability {
+    val hasQueueNavigation = queueSize > 1 && currentIndex in 0 until queueSize
+    return SystemMediaTransportAvailability(
+        previousAvailable = hasQueueNavigation,
+        nextAvailable = hasQueueNavigation,
+    )
+}
+
+internal fun resolveQueueMoveTargetIndex(
     queueSize: Int,
     currentIndex: Int,
     playMode: PlayMode,
+    delta: Int,
     shuffleCandidateIndex: Int? = null,
 ): Int? {
     if (queueSize <= 0) return null
@@ -137,13 +156,72 @@ internal fun resolvePlaybackEndTargetIndex(
                 shuffleCandidateIndex
                     ?.takeIf { it in 0 until queueSize && it != safeCurrentIndex }
                     ?: (0 until queueSize).firstOrNull { it != safeCurrentIndex }
+                    ?: safeCurrentIndex
             }
         }
-        PlayMode.SEQUENCE,
+        else -> {
+            val raw = safeCurrentIndex + delta
+            when {
+                raw > queueSize - 1 -> if (playMode == PlayMode.LIST_LOOP) 0 else queueSize - 1
+                raw < 0 -> if (playMode == PlayMode.LIST_LOOP) queueSize - 1 else 0
+                else -> raw
+            }
+        }
+    }
+}
+
+internal fun resolvePlaybackEndTargetIndex(
+    queueSize: Int,
+    currentIndex: Int,
+    playMode: PlayMode,
+    shuffleCandidateIndex: Int? = null,
+): Int? {
+    if (queueSize <= 0) return null
+    val safeCurrentIndex = currentIndex.coerceIn(0, queueSize - 1)
+    return when (playMode) {
+        PlayMode.SINGLE_LOOP -> safeCurrentIndex
+        PlayMode.SEQUENCE -> (safeCurrentIndex + 1).takeIf { it < queueSize }
         PlayMode.LIST_LOOP,
+        PlayMode.SHUFFLE,
         PlayMode.HEART,
         -> (safeCurrentIndex + 1) % queueSize
     }
+}
+
+internal data class PlaybackQueuePlan(
+    val tracks: List<TrackItem>,
+    val startIndex: Int,
+)
+
+internal fun resolvePlaybackQueuePlan(
+    tracks: List<TrackItem>,
+    startIndex: Int,
+    playMode: PlayMode,
+    shuffledTracks: List<TrackItem>? = null,
+    keepRequestedTrackFirst: Boolean = true,
+): PlaybackQueuePlan {
+    if (tracks.isEmpty()) {
+        return PlaybackQueuePlan(emptyList(), 0)
+    }
+    val safeStartIndex = startIndex.coerceIn(0, tracks.lastIndex)
+    if (playMode != PlayMode.SHUFFLE) {
+        return PlaybackQueuePlan(tracks, safeStartIndex)
+    }
+    val requestedShuffle = shuffledTracks ?: tracks.shuffled()
+    val originalIds = tracks.map { it.id }.toSet()
+    val shuffledUnique = requestedShuffle
+        .filter { it.id in originalIds }
+        .distinctBy { it.id }
+    val shuffledIds = shuffledUnique.map { it.id }.toSet()
+    val ordered = shuffledUnique + tracks.filterNot { it.id in shuffledIds }
+    if (!keepRequestedTrackFirst) {
+        return PlaybackQueuePlan(ordered, 0)
+    }
+    val requestedTrack = tracks[safeStartIndex]
+    return PlaybackQueuePlan(
+        tracks = listOf(requestedTrack) + ordered.filterNot { it.id == requestedTrack.id },
+        startIndex = 0,
+    )
 }
 
 @Singleton
@@ -312,11 +390,20 @@ class PlaybackCoordinator @Inject constructor(
         }
     }
 
-    suspend fun playTracks(tracks: List<TrackItem>, startIndex: Int = 0) {
+    suspend fun playTracks(
+        tracks: List<TrackItem>,
+        startIndex: Int = 0,
+        keepRequestedTrackFirstInShuffle: Boolean = true,
+    ) {
         if (tracks.isEmpty()) return
-        queueRepository.replaceQueue(tracks)
-        val safeIndex = startIndex.coerceIn(0, tracks.lastIndex)
-        playTrack(tracks[safeIndex], safeIndex)
+        val queuePlan = resolvePlaybackQueuePlan(
+            tracks = tracks,
+            startIndex = startIndex,
+            playMode = _uiState.value.playMode,
+            keepRequestedTrackFirst = keepRequestedTrackFirstInShuffle,
+        )
+        queueRepository.replaceQueue(queuePlan.tracks)
+        playTrack(queuePlan.tracks[queuePlan.startIndex], queuePlan.startIndex)
     }
 
     suspend fun playTrack(track: TrackItem, queueIndex: Int? = null) {
@@ -386,18 +473,14 @@ class PlaybackCoordinator @Inject constructor(
         val queue = _uiState.value.queue
         if (queue.isEmpty()) return
         val current = _uiState.value.currentIndex.coerceAtLeast(0)
-        val nextIndex = when (_uiState.value.playMode) {
-            PlayMode.SINGLE_LOOP -> current
-            PlayMode.SHUFFLE -> (queue.indices - current).randomOrNull() ?: current
-            else -> {
-                val raw = current + delta
-                when {
-                    raw > queue.lastIndex -> if (_uiState.value.playMode == PlayMode.LIST_LOOP) 0 else queue.lastIndex
-                    raw < 0 -> if (_uiState.value.playMode == PlayMode.LIST_LOOP) queue.lastIndex else 0
-                    else -> raw
-                }
-            }
-        }
+        val shuffleCandidateIndex = (queue.indices - current).randomOrNull()
+        val nextIndex = resolveQueueMoveTargetIndex(
+            queueSize = queue.size,
+            currentIndex = current,
+            playMode = _uiState.value.playMode,
+            delta = delta,
+            shuffleCandidateIndex = shuffleCandidateIndex,
+        ) ?: return
         appScope.launch { playTrack(queue[nextIndex], nextIndex) }
     }
 
@@ -410,11 +493,6 @@ class PlaybackCoordinator @Inject constructor(
                 queueSize = queue.size,
                 currentIndex = state.currentIndex,
                 playMode = state.playMode,
-                shuffleCandidateIndex = if (state.playMode == PlayMode.SHUFFLE) {
-                    (queue.indices - state.currentIndex).randomOrNull()
-                } else {
-                    null
-                },
             ) ?: return@launch
             val targetTrack = queue.getOrNull(targetIndex) ?: return@launch
             val currentTrack = state.currentTrack
@@ -470,9 +548,18 @@ class PlaybackCoordinator @Inject constructor(
         queueIndex: Int,
         startPlayback: Boolean,
     ) {
+        val metadata = MediaMetadata.Builder()
+            .setTitle(track.name)
+            .setArtist(track.artists)
+            .setAlbumTitle(track.album)
+            .setArtworkUri(track.coverUrl.takeIf { it.isNotBlank() }?.let(Uri::parse))
+            .setDurationMs(track.durationMs)
+            .build()
+
         val mediaItem = MediaItem.Builder()
             .setMediaId(track.id.toString())
             .setUri(source.url)
+            .setMediaMetadata(metadata)
             .setTag(track)
             .build()
 
@@ -600,7 +687,7 @@ class PlaybackCoordinator @Inject constructor(
 
         if (retryCount > retryLimit) {
             _uiState.value = _uiState.value.copy(errorMessage = "$reason，已跳过")
-            moveQueue(1)
+            moveToPlaybackEndTarget()
             return
         }
 
@@ -619,8 +706,18 @@ class PlaybackCoordinator @Inject constructor(
             _uiState.value = _uiState.value.copy(errorMessage = "$reason，已恢复")
         }.onFailure {
             _uiState.value = _uiState.value.copy(errorMessage = "$reason，恢复失败")
-            moveQueue(1)
+            moveToPlaybackEndTarget()
         }
+    }
+
+    private fun moveToPlaybackEndTarget() {
+        val state = _uiState.value
+        val targetIndex = resolvePlaybackEndTargetIndex(
+            queueSize = state.queue.size,
+            currentIndex = state.currentIndex,
+            playMode = state.playMode,
+        ) ?: return
+        playQueueIndex(targetIndex)
     }
 
     private suspend fun <T> withPlayer(block: ExoPlayer.() -> T): T {

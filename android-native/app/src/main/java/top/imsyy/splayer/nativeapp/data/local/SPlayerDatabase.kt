@@ -39,6 +39,19 @@ data class FailedSourceEntity(
     val source: String,
 )
 
+@Entity(tableName = "playlist_detail_cache")
+data class PlaylistDetailCacheEntity(
+    @PrimaryKey val playlistId: Long,
+    val name: String,
+    val coverUrl: String,
+    val description: String,
+    val playCount: Long,
+    val subscribedCount: Long,
+    val trackCount: Int,
+    val tracksJson: String,
+    val cachedAt: Long,
+)
+
 @Dao
 interface PlaybackQueueDao {
     @Query("SELECT * FROM playback_queue ORDER BY queueIndex ASC")
@@ -81,13 +94,28 @@ interface FailedSourceDao {
     suspend fun clearAll()
 }
 
+@Dao
+interface PlaylistDetailCacheDao {
+    @Query("SELECT * FROM playlist_detail_cache WHERE playlistId = :playlistId")
+    suspend fun findById(playlistId: Long): PlaylistDetailCacheEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(item: PlaylistDetailCacheEntity)
+}
+
 @Database(
-    entities = [PlaybackQueueEntity::class, RecentPlayEntity::class, FailedSourceEntity::class],
-    version = 1,
+    entities = [
+        PlaybackQueueEntity::class,
+        RecentPlayEntity::class,
+        FailedSourceEntity::class,
+        PlaylistDetailCacheEntity::class,
+    ],
+    version = 2,
     exportSchema = false,
 )
 abstract class SPlayerDatabase : RoomDatabase() {
     abstract fun playbackQueueDao(): PlaybackQueueDao
     abstract fun recentPlayDao(): RecentPlayDao
     abstract fun failedSourceDao(): FailedSourceDao
+    abstract fun playlistDetailCacheDao(): PlaylistDetailCacheDao
 }

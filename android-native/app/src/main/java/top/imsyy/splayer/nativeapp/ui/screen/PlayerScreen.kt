@@ -177,15 +177,13 @@ fun PlayerScreen(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                    .padding(horizontal = 10.dp, vertical = 0.dp),
             ) {
                 PlayerTopBar(
                     track = track,
                     lyricMode = lyricMode,
                     onClose = onClose,
                 )
-
-                Spacer(Modifier.height(4.dp))
 
                 Box(
                     modifier = Modifier
@@ -1406,7 +1404,7 @@ internal fun normalizeDiscRotation(
 internal fun resolveLyricMainTextScale(
     lyricFontScale: Float,
 ): Float {
-    return lyricFontScale * 1.32f
+    return lyricFontScale
 }
 
 internal fun resolvePreviewAnchorMainTextScale(
@@ -1418,24 +1416,24 @@ internal fun resolvePreviewAnchorMainTextScale(
 internal fun resolvePlayerStageToProgressGapDp(
     lyricMode: Boolean,
 ): Float {
-    val fixedGap = 8f
+    val fixedGap = 4f
     return if (lyricMode) fixedGap else fixedGap
 }
 
-internal fun resolvePlayerLyricToggleSlotHeightDp(): Float = 36f
+internal fun resolvePlayerLyricToggleSlotHeightDp(): Float = 32f
 
-internal fun resolvePlayerStatusSlotHeightDp(): Float = 26f
+internal fun resolvePlayerStatusSlotHeightDp(): Float = 22f
 
 internal fun resolveLyricTranslationTextScale(
     lyricFontScale: Float,
 ): Float {
-    return lyricFontScale * 1.08f
+    return lyricFontScale * 0.9f
 }
 
 internal fun resolveLyricRomanizedTextScale(
     lyricFontScale: Float,
 ): Float {
-    return lyricFontScale * 0.98f
+    return lyricFontScale * 0.86f
 }
 
 internal data class CenteredLyricCandidate(
@@ -1570,11 +1568,12 @@ internal fun resolveCoverStageLayout(
     maxWidthDp: Float,
     maxHeightDp: Float,
 ): CoverStageLayout {
-    val discFloor = minOf(maxWidthDp * 0.96f, 384f)
+    val verticalDiscLimit = maxHeightDp * 0.58f
+    val discFloor = minOf(maxWidthDp * 0.88f, verticalDiscLimit, 384f)
     val discSize = minOf(
-        maxWidthDp * 1.12f,
-        maxHeightDp * 0.72f,
-        560f,
+        maxWidthDp * 1.02f,
+        verticalDiscLimit,
+        500f,
     ).coerceAtLeast(discFloor).roundToInt().toFloat()
     val toneArmSlotWidth = (discSize * 0.54f).roundToInt().toFloat()
     val toneArmSlotHeight = (discSize * 0.48f).roundToInt().toFloat()
@@ -1583,7 +1582,7 @@ internal fun resolveCoverStageLayout(
         toneArmSlotWidth + 54f,
     ).roundToInt().toFloat()
     val stageTopOffset = (maxHeightDp * 0.012f).coerceIn(4f, 12f).roundToInt().toFloat()
-    val visualTopInset = (maxHeightDp * 0.15f).coerceIn(42f, 148f).roundToInt().toFloat()
+    val visualTopInset = (maxHeightDp * 0.06f).coerceIn(20f, 72f).roundToInt().toFloat()
     val infoBottomPadding = (maxHeightDp * 0.02f).coerceIn(6f, 16f).roundToInt().toFloat()
     val visualZoneHeight = (compositionSize + visualTopInset).roundToInt().toFloat()
     return CoverStageLayout(
@@ -1624,10 +1623,7 @@ internal fun resolvePlayerControlsReserveDp(
 internal fun resolvePlayerBottomSafeGapDp(
     viewportHeightDp: Float,
 ): Float {
-    return (viewportHeightDp * 0.035f)
-        .coerceIn(14f, 34f)
-        .roundToInt()
-        .toFloat()
+    return if (viewportHeightDp > 0f) 0f else 0f
 }
 
 internal fun resolveLyricViewportLayout(
@@ -1636,11 +1632,11 @@ internal fun resolveLyricViewportLayout(
     return LyricViewportLayout(
         topPaddingDp = 0f,
         bottomPaddingDp = 0f,
-        lineSpacingDp = 22f,
+        lineSpacingDp = 14f,
         horizontalPaddingDp = if (viewportHeightDp >= 560f) 6f else 4f,
-        linePaddingDp = 4f,
-        previewPaddingDp = 10f,
-        edgeMinPaddingDp = 20f,
+        linePaddingDp = 2f,
+        previewPaddingDp = 8f,
+        edgeMinPaddingDp = 14f,
     )
 }
 
@@ -1677,21 +1673,21 @@ internal fun estimateLyricLineHeightPx(
     density: Density,
 ): Int {
     return with(density) {
-        val mainHeight = (68.dp * lyricFontScale).roundToPx()
+        val mainHeight = (58.dp * lyricFontScale).roundToPx()
         val translationHeight = if (showTranslation && line.translation.isNotBlank()) {
-            (42.dp * lyricFontScale).roundToPx()
+            (34.dp * lyricFontScale).roundToPx()
         } else {
             0
         }
         val romanizedHeight = if (showRomanized && line.romanized.isNotBlank()) {
-            (36.dp * lyricFontScale).roundToPx()
+            (30.dp * lyricFontScale).roundToPx()
         } else {
             0
         }
         val extraSpacing = when {
-            translationHeight > 0 && romanizedHeight > 0 -> 14.dp.roundToPx()
-            translationHeight > 0 || romanizedHeight > 0 -> 8.dp.roundToPx()
-            else -> 4.dp.roundToPx()
+            translationHeight > 0 && romanizedHeight > 0 -> 10.dp.roundToPx()
+            translationHeight > 0 || romanizedHeight > 0 -> 6.dp.roundToPx()
+            else -> 2.dp.roundToPx()
         }
         mainHeight + translationHeight + romanizedHeight + extraSpacing
     }

@@ -236,6 +236,7 @@ fun SPlayerNativeApp() {
                     composable(Routes.Player) {
                         PlayerScreen(
                             onClose = { navController.popBackStack() },
+                            viewModel = playerViewModel,
                         )
                     }
                     composable(
@@ -245,7 +246,11 @@ fun SPlayerNativeApp() {
                         PlaylistDetailScreen(
                             onBack = { navController.popBackStack() },
                             onPlayAll = { tracks ->
-                                playerViewModel.playTracks(tracks, 0)
+                                playerViewModel.playTracks(
+                                    tracks = tracks,
+                                    startIndex = 0,
+                                    keepRequestedTrackFirstInShuffle = false,
+                                )
                                 navController.navigate(Routes.Player)
                             },
                             onPlayTrack = { tracks, index ->
@@ -261,7 +266,11 @@ fun SPlayerNativeApp() {
                         AlbumDetailScreen(
                             onBack = { navController.popBackStack() },
                             onPlayAll = { tracks ->
-                                playerViewModel.playTracks(tracks, 0)
+                                playerViewModel.playTracks(
+                                    tracks = tracks,
+                                    startIndex = 0,
+                                    keepRequestedTrackFirstInShuffle = false,
+                                )
                                 navController.navigate(Routes.Player)
                             },
                             onPlayTrack = { tracks, index ->

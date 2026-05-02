@@ -96,6 +96,7 @@ class HomeViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(HomeUiState())
     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
     private var latestDiscoveryHome = DiscoveryHomeUi()
+    private var refreshJob: Job? = null
 
     private val recentFlow = queueRepository.observeRecent().stateIn(
         viewModelScope,
@@ -119,13 +120,25 @@ class HomeViewModel @Inject constructor(
         }
     }
 
-    fun refresh() {
-        viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(loading = true, errorMessage = null)
+    fun refresh(
+        forceRefresh: Boolean = false,
+        showLoading: Boolean = true,
+    ) {
+        if (refreshJob?.isActive == true) return
+        refreshJob = viewModelScope.launch {
+            val hasContent = latestDiscoveryHome.hasDiscoveryHomeContent()
+            val visibleLoading = shouldShowRefreshLoading(
+                hasContent = hasContent,
+                showLoading = showLoading,
+            )
+            _uiState.value = _uiState.value.copy(
+                loading = visibleLoading,
+                errorMessage = null,
+            )
             runCatching {
                 supervisorScope {
                     val userDeferred = async { remoteRepository.fetchLoginState() }
-                    val discoveryDeferred = async { remoteRepository.fetchDiscoveryHome() }
+                    val discoveryDeferred = async { remoteRepository.fetchDiscoveryHome(forceRefresh = forceRefresh) }
                     val searchHintDeferred = async { remoteRepository.fetchSearchDefault() }
                     Triple(
                         userDeferred.await(),
@@ -147,7 +160,11 @@ class HomeViewModel @Inject constructor(
             }.onFailure { error ->
                 _uiState.value = _uiState.value.copy(
                     loading = false,
-                    errorMessage = sanitizeLoadErrorMessage(error.message, "加载首页失败"),
+                    errorMessage = if (visibleLoading || !hasContent) {
+                        sanitizeLoadErrorMessage(error.message, "加载首页失败")
+                    } else {
+                        null
+                    },
                 )
             }
         }
@@ -170,25 +187,43 @@ class DiscoveryViewModel @Inject constructor(
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(DiscoveryUiState())
     val uiState: StateFlow<DiscoveryUiState> = _uiState.asStateFlow()
+    private var refreshJob: Job? = null
 
     init {
         refresh()
     }
 
-    fun refresh() {
-        viewModelScope.launch {
-            _uiState.value = DiscoveryUiState(loading = true)
+    fun refresh(
+        forceRefresh: Boolean = false,
+        showLoading: Boolean = true,
+    ) {
+        if (refreshJob?.isActive == true) return
+        refreshJob = viewModelScope.launch {
+            val currentState = _uiState.value
+            val hasContent = currentState.content.hasDiscoveryBrowseContent()
+            val visibleLoading = shouldShowRefreshLoading(
+                hasContent = hasContent,
+                showLoading = showLoading,
+            )
+            _uiState.value = currentState.copy(
+                loading = visibleLoading,
+                errorMessage = null,
+            )
             runCatching {
-                buildDiscoveryBrowseUi(remoteRepository.fetchDiscoveryHome())
+                buildDiscoveryBrowseUi(remoteRepository.fetchDiscoveryHome(forceRefresh = forceRefresh))
             }.onSuccess { content ->
                 _uiState.value = DiscoveryUiState(
                     content = content,
                     loading = false,
                 )
             }.onFailure { error ->
-                _uiState.value = DiscoveryUiState(
+                _uiState.value = _uiState.value.copy(
                     loading = false,
-                    errorMessage = sanitizeLoadErrorMessage(error.message, "加载发现页失败"),
+                    errorMessage = if (visibleLoading || !hasContent) {
+                        sanitizeLoadErrorMessage(error.message, "加载发现页失败")
+                    } else {
+                        null
+                    },
                 )
             }
         }
@@ -445,6 +480,7 @@ class PlaylistDetailViewModel @Inject constructor(
     private val playlistId = savedStateHandle.get<String>(Routes.PlaylistIdArg)?.toLongOrNull() ?: 0L
     private val _uiState = MutableStateFlow(PlaylistDetailUiState())
     val uiState: StateFlow<PlaylistDetailUiState> = _uiState.asStateFlow()
+    private var fullPlaylistLoadJob: Job? = null
 
     init {
         refresh()
@@ -458,49 +494,87 @@ class PlaylistDetailViewModel @Inject constructor(
             )
             return
         }
+        fullPlaylistLoadJob?.cancel()
         viewModelScope.launch {
-            val cached = remoteRepository.peekCachedPlaylistDetail(playlistId)
-            _uiState.value = if (cached == null) {
-                PlaylistDetailUiState(loading = true)
-            } else {
-                PlaylistDetailUiState(
-                    playlist = cached,
-                    loading = false,
-                    hasMore = cached.tracks.size < cached.trackCount,
-                )
-            }
-            runCatching {
-                remoteRepository.fetchPlaylistPreviewDetail(
-                    playlistId = playlistId,
-                    forceRefresh = false,
-                )
-            }.onSuccess { playlist ->
-                _uiState.value = PlaylistDetailUiState(
-                    playlist = playlist,
-                    loading = false,
-                    primingFirstPage = shouldPrimeFirstPage(playlist),
-                    hasMore = playlist.tracks.size < playlist.trackCount,
-                )
-                if (shouldPrimeFirstPage(playlist)) {
-                    primeFirstPage(forceRefresh = cached == null)
-                }
-            }.onFailure { error ->
-                if (cached == null) {
-                    _uiState.value = PlaylistDetailUiState(
-                        loading = false,
-                        errorMessage = sanitizeLoadErrorMessage(error.message, "加载歌单失败"),
-                    )
+            supervisorScope {
+                val cached = remoteRepository.peekCachedPlaylistDetail(playlistId)
+                    ?: remoteRepository.readCachedPlaylistDetail(playlistId)
+                _uiState.value = if (cached == null) {
+                    PlaylistDetailUiState(loading = true)
                 } else {
-                    _uiState.value = _uiState.value.copy(
+                    PlaylistDetailUiState(
+                        playlist = cached,
                         loading = false,
-                        primingFirstPage = false,
+                        hasMore = cached.tracks.size < cached.trackCount,
                     )
+                }
+                val shouldPrimeCached = cached == null ||
+                    cached.tracks.size < minOf(
+                        cached.trackCount.takeIf { it > 0 } ?: PLAYLIST_FIRST_SCREEN_TARGET,
+                        PLAYLIST_FIRST_SCREEN_TARGET,
+                    )
+                val initialTracksDeferred = if (shouldPrimeCached) {
+                    async {
+                        remoteRepository.fetchPlaylistInitialTracks(
+                            playlistId = playlistId,
+                            forceRefresh = cached == null,
+                        )
+                    }
+                } else {
+                    null
+                }
+                runCatching {
+                    remoteRepository.fetchPlaylistPreviewDetail(
+                        playlistId = playlistId,
+                        forceRefresh = false,
+                    )
+                }.onSuccess { playlist ->
+                    _uiState.value = PlaylistDetailUiState(
+                        playlist = playlist,
+                        loading = false,
+                        primingFirstPage = shouldPrimeFirstPage(playlist),
+                        hasMore = playlist.tracks.size < playlist.trackCount,
+                    )
+                    if (shouldPrimeFirstPage(playlist)) {
+                        primeFirstPage(initialTracksDeferred = initialTracksDeferred)
+                    } else {
+                        initialTracksDeferred?.cancel()
+                    }
+                    startFullPlaylistLoad()
+                }.onFailure { error ->
+                    initialTracksDeferred?.cancel()
+                    if (cached == null) {
+                        _uiState.value = PlaylistDetailUiState(
+                            loading = false,
+                            errorMessage = sanitizeLoadErrorMessage(error.message, "加载歌单失败"),
+                        )
+                    } else {
+                        _uiState.value = _uiState.value.copy(
+                            loading = false,
+                            primingFirstPage = false,
+                        )
+                        startFullPlaylistLoad()
+                    }
                 }
             }
         }
     }
 
-    private suspend fun primeFirstPage(forceRefresh: Boolean) {
+    private fun startFullPlaylistLoad() {
+        val playlist = _uiState.value.playlist ?: return
+        if (playlist.tracks.size >= playlist.trackCount) return
+        if (fullPlaylistLoadJob?.isActive == true) return
+        fullPlaylistLoadJob = viewModelScope.launch {
+            ensureAllTracksLoaded()
+        }
+    }
+
+    override fun onCleared() {
+        fullPlaylistLoadJob?.cancel()
+        super.onCleared()
+    }
+
+    private suspend fun primeFirstPage(initialTracksDeferred: kotlinx.coroutines.Deferred<List<TrackItem>>? = null) {
         val currentState = _uiState.value
         val playlist = currentState.playlist ?: return
         if (!shouldPrimeFirstPage(playlist)) {
@@ -511,10 +585,7 @@ class PlaylistDetailViewModel @Inject constructor(
             return
         }
         runCatching {
-            remoteRepository.fetchPlaylistInitialTracks(
-                playlistId = playlist.id,
-                forceRefresh = forceRefresh,
-            )
+            initialTracksDeferred?.await() ?: remoteRepository.fetchPlaylistInitialTracks(playlistId = playlist.id)
         }.onSuccess { page ->
             val latestState = _uiState.value
             val latestPlaylist = latestState.playlist ?: return@onSuccess
@@ -597,6 +668,7 @@ class PlaylistDetailViewModel @Inject constructor(
                     offset = mergedTracks.size,
                 )
             }.getOrElse { error ->
+                if (error is CancellationException) throw error
                 _uiState.value = _uiState.value.copy(
                     isAppending = false,
                     appendErrorMessage = sanitizeLoadErrorMessage(error.message, "加载更多歌曲失败"),
@@ -800,10 +872,18 @@ class PlayerViewModel @Inject constructor(
         }
     }
 
-    fun playTracks(tracks: List<TrackItem>, startIndex: Int = 0) {
+    fun playTracks(
+        tracks: List<TrackItem>,
+        startIndex: Int = 0,
+        keepRequestedTrackFirstInShuffle: Boolean = true,
+    ) {
         if (tracks.isEmpty()) return
         viewModelScope.launch {
-            playbackCoordinator.playTracks(tracks, startIndex.coerceIn(0, tracks.lastIndex))
+            playbackCoordinator.playTracks(
+                tracks = tracks,
+                startIndex = startIndex.coerceIn(0, tracks.lastIndex),
+                keepRequestedTrackFirstInShuffle = keepRequestedTrackFirstInShuffle,
+            )
         }
     }
 
@@ -1095,11 +1175,61 @@ internal fun resolveMergedTrackPage(
 internal fun resolveMaxPlaylistPageRequests(
     loadedTrackCount: Int,
     trackCount: Int,
-    pageSize: Int = 200,
+    pageSize: Int = 500,
 ): Int {
     val remaining = (trackCount - loadedTrackCount).coerceAtLeast(0)
     if (remaining == 0) return 0
     return ((remaining + pageSize - 1) / pageSize).coerceAtLeast(1) + 1
+}
+
+internal data class PlaylistPlaybackRequest(
+    val tracks: List<TrackItem>,
+    val startIndex: Int,
+)
+
+internal fun resolvePlaylistPlaybackRequest(
+    clickedTrackId: Long,
+    loadedTracks: List<TrackItem>,
+    clickedIndex: Int,
+): PlaylistPlaybackRequest {
+    if (loadedTracks.isEmpty()) {
+        return PlaylistPlaybackRequest(
+            tracks = loadedTracks,
+            startIndex = 0,
+        )
+    }
+    val resolvedIndex = loadedTracks
+        .indexOfFirst { track -> track.id == clickedTrackId }
+        .takeIf { index -> index >= 0 }
+        ?: clickedIndex.coerceIn(0, loadedTracks.lastIndex)
+    return PlaylistPlaybackRequest(
+        tracks = loadedTracks,
+        startIndex = resolvedIndex,
+    )
+}
+
+internal fun shouldShowRefreshLoading(
+    hasContent: Boolean,
+    showLoading: Boolean,
+): Boolean {
+    return showLoading || !hasContent
+}
+
+private fun DiscoveryHomeUi.hasDiscoveryHomeContent(): Boolean {
+    return recommendedPlaylists.isNotEmpty() ||
+        newSongs.isNotEmpty() ||
+        topArtists.isNotEmpty() ||
+        newAlbums.isNotEmpty() ||
+        topPlaylists.isNotEmpty()
+}
+
+private fun DiscoveryBrowseUi.hasDiscoveryBrowseContent(): Boolean {
+    return quickEntries.isNotEmpty() ||
+        featuredPlaylists.isNotEmpty() ||
+        topPlaylists.isNotEmpty() ||
+        newSongs.isNotEmpty() ||
+        newAlbums.isNotEmpty() ||
+        topArtists.isNotEmpty()
 }
 
 private fun mergeCommentItems(

@@ -16,14 +16,15 @@ class PlayerScreenSupportTest {
             maxHeightDp = 430f,
         )
 
-        assertTrue(layout.discSizeDp >= 340f)
+        assertTrue(layout.discSizeDp in 248f..270f)
         assertTrue(layout.stageTopOffsetDp in 4f..12f)
         assertTrue(layout.visualZoneHeightDp >= layout.discSizeDp)
         assertTrue(layout.visualZoneHeightDp <= layout.compositionSizeDp + layout.visualTopInsetDp + 12f)
-        assertTrue(layout.visualTopInsetDp in 42f..148f)
-        assertTrue(layout.artworkSizeDp >= 235f)
+        assertTrue(layout.visualTopInsetDp in 20f..32f)
+        assertTrue(layout.artworkSizeDp >= 170f)
         assertTrue(layout.infoBottomPaddingDp in 6f..16f)
         assertTrue(layout.visualZoneHeightDp >= layout.compositionSizeDp + layout.visualTopInsetDp)
+        assertTrue(layout.visualZoneHeightDp <= 300f)
     }
 
     @Test
@@ -33,11 +34,12 @@ class PlayerScreenSupportTest {
             maxHeightDp = 560f,
         )
 
-        assertTrue(layout.discSizeDp >= 400f)
+        assertTrue(layout.discSizeDp in 320f..340f)
         assertTrue(layout.stageTopOffsetDp in 4f..12f)
         assertTrue(layout.visualZoneHeightDp <= layout.compositionSizeDp + layout.visualTopInsetDp + 12f)
-        assertTrue(layout.visualTopInsetDp in 70f..148f)
-        assertTrue(layout.artworkSizeDp >= 275f)
+        assertTrue(layout.visualTopInsetDp in 28f..42f)
+        assertTrue(layout.artworkSizeDp >= 220f)
+        assertTrue(layout.visualZoneHeightDp <= 370f)
     }
 
     @Test
@@ -54,55 +56,55 @@ class PlayerScreenSupportTest {
     }
 
     @Test
-    fun `resolveLyricViewportLayout uses larger netease style lyric rhythm`() {
+    fun `resolveLyricViewportLayout uses compact netease style lyric rhythm`() {
         val layout = resolveLyricViewportLayout(
             viewportHeightDp = 520f,
         )
 
         assertEquals(0f, layout.topPaddingDp, 0.01f)
         assertEquals(0f, layout.bottomPaddingDp, 0.01f)
-        assertEquals(22f, layout.lineSpacingDp, 0.01f)
-        assertEquals(4f, layout.linePaddingDp, 0.01f)
-        assertEquals(10f, layout.previewPaddingDp, 0.01f)
-        assertEquals(20f, layout.edgeMinPaddingDp, 0.01f)
+        assertEquals(14f, layout.lineSpacingDp, 0.01f)
+        assertEquals(2f, layout.linePaddingDp, 0.01f)
+        assertEquals(8f, layout.previewPaddingDp, 0.01f)
+        assertEquals(14f, layout.edgeMinPaddingDp, 0.01f)
     }
 
     @Test
     fun `lyric preview anchor keeps the same main text scale as lyric lines`() {
-        assertEquals(1.32f, resolveLyricMainTextScale(1f), 0.01f)
+        assertEquals(1f, resolveLyricMainTextScale(1f), 0.01f)
         assertEquals(resolveLyricMainTextScale(1.2f), resolvePreviewAnchorMainTextScale(1.2f), 0.01f)
-        assertTrue(resolveLyricTranslationTextScale(1f) > 1f)
+        assertTrue(resolveLyricTranslationTextScale(1f) < 1f)
     }
 
     @Test
     fun `resolvePlayerStageHeightDp keeps bottom chrome stable across cover and lyric pages`() {
-        assertEquals(370f, resolvePlayerStageHeightDp(viewportHeightDp = 628f, lyricMode = true), 0.01f)
-        assertEquals(370f, resolvePlayerStageHeightDp(viewportHeightDp = 628f, lyricMode = false), 0.01f)
-        assertEquals(1010f, resolvePlayerStageHeightDp(viewportHeightDp = 1280f, lyricMode = true), 0.01f)
-        assertEquals(1010f, resolvePlayerStageHeightDp(viewportHeightDp = 1280f, lyricMode = false), 0.01f)
-        assertEquals(1230f, resolvePlayerStageHeightDp(viewportHeightDp = 1500f, lyricMode = true), 0.01f)
-        assertEquals(1230f, resolvePlayerStageHeightDp(viewportHeightDp = 1500f, lyricMode = false), 0.01f)
+        assertEquals(392f, resolvePlayerStageHeightDp(viewportHeightDp = 628f, lyricMode = true), 0.01f)
+        assertEquals(392f, resolvePlayerStageHeightDp(viewportHeightDp = 628f, lyricMode = false), 0.01f)
+        assertEquals(1044f, resolvePlayerStageHeightDp(viewportHeightDp = 1280f, lyricMode = true), 0.01f)
+        assertEquals(1044f, resolvePlayerStageHeightDp(viewportHeightDp = 1280f, lyricMode = false), 0.01f)
+        assertEquals(1264f, resolvePlayerStageHeightDp(viewportHeightDp = 1500f, lyricMode = true), 0.01f)
+        assertEquals(1264f, resolvePlayerStageHeightDp(viewportHeightDp = 1500f, lyricMode = false), 0.01f)
     }
 
     @Test
     fun `player controls reserve is mode neutral and overlay slots are fixed`() {
         assertEquals(236f, resolvePlayerControlsReserveDp(lyricMode = false), 0.01f)
         assertEquals(236f, resolvePlayerControlsReserveDp(lyricMode = true), 0.01f)
-        assertEquals(36f, resolvePlayerLyricToggleSlotHeightDp(), 0.01f)
-        assertEquals(26f, resolvePlayerStatusSlotHeightDp(), 0.01f)
+        assertEquals(32f, resolvePlayerLyricToggleSlotHeightDp(), 0.01f)
+        assertEquals(22f, resolvePlayerStatusSlotHeightDp(), 0.01f)
     }
 
     @Test
     fun `player bottom safe gap adds a small visual reserve above navigation keys`() {
-        assertEquals(14f, resolvePlayerBottomSafeGapDp(360f), 0.01f)
-        assertEquals(22f, resolvePlayerBottomSafeGapDp(628f), 0.01f)
-        assertEquals(34f, resolvePlayerBottomSafeGapDp(1280f), 0.01f)
+        assertEquals(0f, resolvePlayerBottomSafeGapDp(360f), 0.01f)
+        assertEquals(0f, resolvePlayerBottomSafeGapDp(628f), 0.01f)
+        assertEquals(0f, resolvePlayerBottomSafeGapDp(1280f), 0.01f)
     }
 
     @Test
     fun `player keeps stage to progress gap identical so progress bar does not jump`() {
-        assertEquals(8f, resolvePlayerStageToProgressGapDp(lyricMode = true), 0.01f)
-        assertEquals(8f, resolvePlayerStageToProgressGapDp(lyricMode = false), 0.01f)
+        assertEquals(4f, resolvePlayerStageToProgressGapDp(lyricMode = true), 0.01f)
+        assertEquals(4f, resolvePlayerStageToProgressGapDp(lyricMode = false), 0.01f)
     }
 
     @Test
@@ -246,7 +248,7 @@ class PlayerScreenSupportTest {
     }
 
     @Test
-    fun `estimateLyricLineHeightPx reserves larger lyric rows for netease style readability`() {
+    fun `estimateLyricLineHeightPx keeps lyric rows compact while reserving translation space`() {
         val singleLine = estimateLyricLineHeightPx(
             line = sampleLyricLine(mainText = "第一句"),
             showTranslation = true,
@@ -262,8 +264,8 @@ class PlayerScreenSupportTest {
             density = androidx.compose.ui.unit.Density(1f),
         )
 
-        assertEquals(72, singleLine)
-        assertEquals(118, translated)
+        assertEquals(60, singleLine)
+        assertEquals(98, translated)
     }
 
     @Test

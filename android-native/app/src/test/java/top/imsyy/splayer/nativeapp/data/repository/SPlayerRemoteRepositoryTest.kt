@@ -11,6 +11,8 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import top.imsyy.splayer.nativeapp.data.local.PlaylistDetailCacheDao
+import top.imsyy.splayer.nativeapp.data.local.PlaylistDetailCacheEntity
 import top.imsyy.splayer.nativeapp.data.api.SPlayerApiService
 import top.imsyy.splayer.nativeapp.model.TrackItem
 
@@ -440,7 +442,7 @@ class SPlayerRemoteRepositoryTest {
         assertEquals("0", detailCall.params["s"])
         assertEquals("true", detailCall.params["noCookie"])
         assertEquals("0", tracksCall.params["offset"])
-        assertEquals("200", tracksCall.params["limit"])
+        assertEquals("500", tracksCall.params["limit"])
     }
 
     @Test
@@ -478,7 +480,7 @@ class SPlayerRemoteRepositoryTest {
         assertEquals("第三首", tracks.first().name)
         assertEquals("3778678", call.params["id"])
         assertEquals("200", call.params["offset"])
-        assertEquals("200", call.params["limit"])
+        assertEquals("500", call.params["limit"])
     }
 
     @Test
@@ -637,6 +639,44 @@ class SPlayerRemoteRepositoryTest {
         assertEquals(2, results.size)
         assertEquals(results.first(), results.last())
         assertEquals(1, api.calls.size)
+    }
+
+    @Test
+    fun `fetchPlaylistPreviewDetail restores persistent cache before remote request`() = runBlocking {
+        val cacheDao = FakePlaylistDetailCacheDao().apply {
+            upsert(
+                PlaylistDetailCacheEntity(
+                    playlistId = 7788L,
+                    name = "缓存歌单",
+                    coverUrl = "https://example.com/cache.jpg",
+                    description = "本地缓存",
+                    playCount = 12L,
+                    subscribedCount = 3L,
+                    trackCount = 1,
+                    tracksJson = """
+                    [
+                      {
+                        "id": 9001,
+                        "name": "缓存歌曲",
+                        "artists": "缓存歌手",
+                        "album": "缓存专辑",
+                        "coverUrl": "https://example.com/song.jpg",
+                        "durationMs": 180000
+                      }
+                    ]
+                    """.trimIndent(),
+                    cachedAt = 1L,
+                ),
+            )
+        }
+        val api = FakeApiService(responses = emptyMap())
+        val repository = SPlayerRemoteRepository(api = api, playlistDetailCacheDao = cacheDao)
+
+        val playlist = repository.fetchPlaylistPreviewDetail(7788L)
+
+        assertEquals("缓存歌单", playlist.name)
+        assertEquals("缓存歌曲", playlist.tracks.single().name)
+        assertEquals(0, api.calls.size)
     }
 
     @Test
@@ -845,6 +885,58 @@ class SPlayerRemoteRepositoryTest {
         assertTrue(lyrics.first().words.isNotEmpty())
         assertEquals(28_590L, lyrics.first().words.first().startTimeMs)
         assertEquals(28_620L, lyrics.first().words[1].startTimeMs)
+    }
+
+    @Test
+    fun `fetchLyrics removes obvious noise from main translated and romanized lyrics`() = runBlocking {
+        val repository = SPlayerRemoteRepository(
+            api = FakeApiService(
+                responses = mapOf(
+                    "netease/lyric/new" to """
+                        {
+                          "code": 200,
+                          "lrc": {
+                            "lyric": "[00:00.000]Sleepyhead-GalenCrew(盖伦·克鲁)\n[00:01.000]//\n[00:02.000]本作品的著作权归版权方所有\n[00:03.000]纪元1239年\n[00:06.000]We were dreaming under moonlight"
+                          },
+                          "tlyric": {
+                            "lyric": "[00:03.000]**纪元1239年\n[00:06.000]月光下我们做梦"
+                          },
+                          "romalrc": {
+                            "lyric": "[00:03.000]//\n[00:06.000]we were dreaming under moonlight"
+                          },
+                          "yrc": { "lyric": "" },
+                          "ytlrc": { "lyric": "" },
+                          "yromalrc": { "lyric": "" }
+                        }
+                    """.trimIndent(),
+                    "netease/lyric/ttml" to "<tt></tt>",
+                    "qqmusic/match" to """
+                        {
+                          "code": 404
+                        }
+                    """.trimIndent(),
+                ),
+            ),
+        )
+
+        val lyrics = repository.fetchLyrics(
+            TrackItem(
+                id = 555001L,
+                name = "Sleepyhead",
+                artists = "GalenCrew",
+                album = "测试专辑",
+                coverUrl = "",
+                durationMs = 180000L,
+            ),
+        )
+
+        assertEquals(2, lyrics.size)
+        assertEquals("纪元1239年", lyrics.first().mainText)
+        assertEquals("", lyrics.first().translation)
+        assertEquals("", lyrics.first().romanized)
+        assertEquals("We were dreaming under moonlight", lyrics.last().mainText)
+        assertEquals("月光下我们做梦", lyrics.last().translation)
+        assertEquals("we were dreaming under moonlight", lyrics.last().romanized)
     }
 
     @Test
@@ -1311,6 +1403,62 @@ class SPlayerRemoteRepositoryTest {
     }
 
     @Test
+    fun `fetchDiscoveryHome expires stale session cache`() = runBlocking {
+        val api = FakeApiService(
+            responses = mapOf(
+                "netease/personalized" to """
+                    {
+                      "result": [
+                        { "id": 1, "name": "推荐歌单", "picUrl": "https://example.com/p1.jpg", "trackCount": 20 }
+                      ]
+                    }
+                """.trimIndent(),
+                "netease/top/song" to """
+                    {
+                      "data": [
+                        {
+                          "id": 101,
+                          "name": "新歌一",
+                          "dt": 180000,
+                          "artists": [{ "name": "歌手甲" }],
+                          "album": { "name": "专辑甲", "picUrl": "https://example.com/a1.jpg" }
+                        }
+                      ]
+                    }
+                """.trimIndent(),
+                "netease/top/artists" to """
+                    {
+                      "artists": [
+                        { "id": 201, "name": "热门歌手", "img1v1Url": "https://example.com/ar1.jpg", "musicSize": 10 }
+                      ]
+                    }
+                """.trimIndent(),
+                "netease/album/new" to """
+                    {
+                      "albums": [
+                        { "id": 301, "name": "新专辑", "picUrl": "https://example.com/al1.jpg", "size": 8 }
+                      ]
+                    }
+                """.trimIndent(),
+                "netease/toplist/detail" to """
+                    {
+                      "list": [
+                        { "id": 401, "name": "飙升榜", "coverImgUrl": "https://example.com/t1.jpg", "trackCount": 100 }
+                      ]
+                    }
+                """.trimIndent(),
+            ),
+        )
+        val repository = SPlayerRemoteRepository(api = api)
+
+        repository.fetchDiscoveryHome()
+        expireDiscoveryHomeCache(repository)
+        repository.fetchDiscoveryHome()
+
+        assertEquals(10, api.calls.size)
+    }
+
+    @Test
     fun `fetchAlbumDetail returns album meta dynamic counters and tracks`() = runBlocking {
         val repository = SPlayerRemoteRepository(
             api = FakeApiService(
@@ -1397,3 +1545,21 @@ private data class ApiCall(
     val url: String,
     val params: Map<String, String>,
 )
+
+private fun expireDiscoveryHomeCache(repository: SPlayerRemoteRepository) {
+    val field = SPlayerRemoteRepository::class.java.getDeclaredField("discoveryHomeCachedAtMs")
+    field.isAccessible = true
+    field.setLong(repository, System.currentTimeMillis() - 31 * 60 * 1000L)
+}
+
+private class FakePlaylistDetailCacheDao : PlaylistDetailCacheDao {
+    private val items = mutableMapOf<Long, PlaylistDetailCacheEntity>()
+
+    override suspend fun findById(playlistId: Long): PlaylistDetailCacheEntity? {
+        return items[playlistId]
+    }
+
+    override suspend fun upsert(item: PlaylistDetailCacheEntity) {
+        items[item.playlistId] = item
+    }
+}

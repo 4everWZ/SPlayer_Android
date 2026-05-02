@@ -1,5 +1,8 @@
 package top.imsyy.splayer.nativeapp.model
 
+import kotlinx.serialization.Serializable
+
+@Serializable
 data class TrackItem(
     val id: Long,
     val name: String,

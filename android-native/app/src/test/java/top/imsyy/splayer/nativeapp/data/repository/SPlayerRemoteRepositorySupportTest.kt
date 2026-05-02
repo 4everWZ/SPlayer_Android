@@ -65,11 +65,41 @@ class SPlayerRemoteRepositorySupportTest {
     }
 
     @Test
+    fun `stripLeadingAndTrailingLyricMetadata removes obvious lyric noise without dropping real lyrics`() {
+        val result = stripLeadingAndTrailingLyricMetadata(
+            listOf(
+                LyricLineUi(startTimeMs = 0L, mainText = "Sleepyhead-GalenCrew(盖伦·克鲁)"),
+                LyricLineUi(startTimeMs = 1_000L, mainText = "//"),
+                LyricLineUi(startTimeMs = 2_000L, mainText = "本作品的著作权归版权方所有"),
+                LyricLineUi(
+                    startTimeMs = 3_000L,
+                    mainText = "纪元1239年",
+                    translation = "**纪元1239年",
+                    romanized = "//",
+                ),
+                LyricLineUi(startTimeMs = 6_000L, mainText = "We were dreaming under moonlight"),
+            ),
+        )
+
+        assertEquals(2, result.size)
+        assertEquals("纪元1239年", result.first().mainText)
+        assertEquals("", result.first().translation)
+        assertEquals("", result.first().romanized)
+        assertEquals("We were dreaming under moonlight", result.last().mainText)
+    }
+
+    @Test
     fun `looksLikeLyricMetadataLine only flags known metadata patterns`() {
         assertTrue(looksLikeLyricMetadataLine("作词：测试"))
         assertTrue(looksLikeLyricMetadataLine("Translation provider: SoryuY"))
         assertTrue(looksLikeLyricMetadataLine("Fromme 's Cloud Drive"))
+        assertTrue(looksLikeLyricMetadataLine("Sleepyhead-GalenCrew(盖伦·克鲁)"))
+        assertTrue(looksLikeLyricMetadataLine("来源：网易云音乐"))
+        assertTrue(looksLikeLyricMetadataLine("本作品的著作权归版权方所有"))
+        assertTrue(looksLikeLyricMetadataLine("//"))
+        assertTrue(looksLikeLyricMetadataLine("**"))
         assertFalse(looksLikeLyricMetadataLine("空も飛べるはず"))
+        assertFalse(looksLikeLyricMetadataLine("tell me why // we still run"))
     }
 
     @Test

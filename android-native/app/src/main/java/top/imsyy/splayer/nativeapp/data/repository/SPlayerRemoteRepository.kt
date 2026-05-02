@@ -10,6 +10,8 @@ import kotlin.math.min
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.supervisorScope
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -23,6 +25,8 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.longOrNull
 import top.imsyy.splayer.nativeapp.data.api.SPlayerApiService
+import top.imsyy.splayer.nativeapp.data.local.PlaylistDetailCacheDao
+import top.imsyy.splayer.nativeapp.data.local.PlaylistDetailCacheEntity
 import top.imsyy.splayer.nativeapp.model.CommentItem
 import top.imsyy.splayer.nativeapp.model.CommentPageResult
 import top.imsyy.splayer.nativeapp.model.DiscoveryHomeUi
@@ -72,11 +76,13 @@ internal class BoundedMemoryCache<K, V>(
 @Singleton
 class SPlayerRemoteRepository @Inject constructor(
     private val api: SPlayerApiService,
+    private val playlistDetailCacheDao: PlaylistDetailCacheDao? = null,
 ) {
     private companion object {
         const val PLAYLIST_PREVIEW_SIZE = 20
         const val PLAYLIST_INITIAL_PAGE_SIZE = 80
-        const val PLAYLIST_PAGE_SIZE = 200
+        const val PLAYLIST_PAGE_SIZE = 500
+        const val DISCOVERY_HOME_CACHE_TTL_MS = 30 * 60 * 1000L
         const val DETAIL_CACHE_LIMIT = 40
         const val PLAYLIST_PAGE_CACHE_LIMIT = 120
         const val LYRIC_CACHE_LIMIT = 128
@@ -97,6 +103,9 @@ class SPlayerRemoteRepository @Inject constructor(
     private var discoveryHomeCache: DiscoveryHomeUi? = null
 
     @Volatile
+    private var discoveryHomeCachedAtMs: Long = 0L
+
+    @Volatile
     private var podcastHomeCache: PodcastHomeUi? = null
 
     @Volatile
@@ -110,6 +119,13 @@ class SPlayerRemoteRepository @Inject constructor(
     }
 
     fun peekCachedPlaylistDetail(playlistId: Long): PlaylistDetailUi? = playlistDetailCache[playlistId]
+
+    suspend fun readCachedPlaylistDetail(playlistId: Long): PlaylistDetailUi? {
+        playlistDetailCache[playlistId]?.let { return it }
+        val cached = playlistDetailCacheDao?.findById(playlistId)?.toPlaylistDetailUi(json) ?: return null
+        playlistDetailCache[playlistId] = cached
+        return cached
+    }
 
     fun peekCachedLyrics(trackId: Long): List<LyricLineUi>? = lyricCache[trackId]
 
@@ -125,6 +141,7 @@ class SPlayerRemoteRepository @Inject constructor(
     ): PlaylistDetailUi {
         if (!forceRefresh) {
             playlistDetailCache[playlistId]?.let { return it }
+            readCachedPlaylistDetail(playlistId)?.let { return it }
         }
         return awaitInFlight("playlist-preview:$playlistId") {
             val playlist = requestPlaylistPayload(playlistId)
@@ -136,6 +153,7 @@ class SPlayerRemoteRepository @Inject constructor(
                 tracks = mergeTrackItems(cachedTracks, previewTracks),
             ).also { detail ->
                 playlistDetailCache[playlistId] = detail
+                persistPlaylistDetail(detail)
             }
         }
     }
@@ -198,7 +216,9 @@ class SPlayerRemoteRepository @Inject constructor(
 
     suspend fun fetchDiscoveryHome(forceRefresh: Boolean = false): DiscoveryHomeUi {
         if (!forceRefresh) {
-            discoveryHomeCache?.let { return it }
+            discoveryHomeCache
+                ?.takeIf { System.currentTimeMillis() - discoveryHomeCachedAtMs < DISCOVERY_HOME_CACHE_TTL_MS }
+                ?.let { return it }
         }
         return supervisorScope {
             val playlistResponse = async { getNetease("personalized", mapOf("limit" to "12")) }
@@ -215,6 +235,7 @@ class SPlayerRemoteRepository @Inject constructor(
             )
         }.also { discoveryHome ->
             discoveryHomeCache = discoveryHome
+            discoveryHomeCachedAtMs = System.currentTimeMillis()
         }
     }
 
@@ -353,6 +374,9 @@ class SPlayerRemoteRepository @Inject constructor(
             playlistDetailCache[playlistId]
                 ?.takeIf { cached -> cached.trackCount == 0 || cached.tracks.size >= min(cached.trackCount, PLAYLIST_PAGE_SIZE) }
                 ?.let { return it }
+            readCachedPlaylistDetail(playlistId)
+                ?.takeIf { cached -> cached.trackCount == 0 || cached.tracks.size >= min(cached.trackCount, PLAYLIST_PAGE_SIZE) }
+                ?.let { return it }
         }
         return supervisorScope {
             val previewDeferred = async {
@@ -380,6 +404,7 @@ class SPlayerRemoteRepository @Inject constructor(
             }
         }.also { detail ->
             playlistDetailCache[playlistId] = detail
+            persistPlaylistDetail(detail)
         }
     }
 
@@ -409,9 +434,11 @@ class SPlayerRemoteRepository @Inject constructor(
             }.also { page ->
                 playlistPageCache[cacheKey] = page
                 playlistDetailCache[playlistId]?.let { cached ->
-                    playlistDetailCache[playlistId] = cached.copy(
+                    val merged = cached.copy(
                         tracks = mergeTrackItems(cached.tracks, page),
                     )
+                    playlistDetailCache[playlistId] = merged
+                    persistPlaylistDetail(merged)
                 }
             }
         }
@@ -729,6 +756,10 @@ class SPlayerRemoteRepository @Inject constructor(
             trackCount = trackCount,
             tracks = tracks.take(trackCount.takeIf { it > 0 } ?: tracks.size),
         )
+    }
+
+    private suspend fun persistPlaylistDetail(detail: PlaylistDetailUi) {
+        playlistDetailCacheDao?.upsert(detail.toCacheEntity(json))
     }
 
     private fun playlistPageCacheKey(
@@ -1259,6 +1290,13 @@ private val lyricMetadataKeywords = listOf(
     "录音",
     "歌词提供",
     "翻译提供",
+    "曲名",
+    "歌名",
+    "歌手",
+    "演唱",
+    "原唱",
+    "来源",
+    "来自",
     "lyrics",
     "lyrics by",
     "lyricist",
@@ -1273,15 +1311,35 @@ private val lyricMetadataKeywords = listOf(
 )
 
 private val lyricMetadataSeparators = setOf(':', '：', '-', ' ', '\t', '/', '|', '(', '（', '[')
+private val lyricTitleArtistPattern = Regex("""^[\p{L}\p{N} .·'’&]+-[\p{L}\p{N} .·'’&]+[（(].+[）)]$""")
 
 internal fun normalizeLyricLineText(text: String): String {
     return text.replace(Regex("""\s+"""), " ").trim()
+}
+
+private fun looksLikeDecorativeLyricNoise(text: String): Boolean {
+    val normalized = normalizeLyricLineText(text)
+    if (normalized == "//") return true
+    if (normalized == "**") return true
+    return normalized.startsWith("**")
+}
+
+private fun cleanSupplementLyricText(text: String): String {
+    val normalized = normalizeLyricLineText(text)
+    return if (looksLikeDecorativeLyricNoise(normalized) || looksLikeLyricMetadataLine(normalized)) {
+        ""
+    } else {
+        normalized
+    }
 }
 
 internal fun looksLikeLyricMetadataLine(text: String): Boolean {
     val normalized = normalizeLyricLineText(text)
     if (normalized.isBlank()) return false
     val lowered = normalized.lowercase()
+    if (looksLikeDecorativeLyricNoise(normalized)) return true
+    if (normalized.contains("著作权") || normalized.contains("版权所有")) return true
+    if (lyricTitleArtistPattern.matches(normalized)) return true
     if (lowered.contains("cloud drive")) return true
     if (lowered.contains("lyrics provider") || lowered.contains("translation provider")) return true
     return lyricMetadataKeywords.any { keyword ->
@@ -1309,8 +1367,8 @@ internal fun stripLeadingAndTrailingLyricMetadata(
         } else {
             line.copy(
                 mainText = mainText,
-                translation = normalizeLyricLineText(line.translation),
-                romanized = normalizeLyricLineText(line.romanized),
+                translation = cleanSupplementLyricText(line.translation),
+                romanized = cleanSupplementLyricText(line.romanized),
             )
         }
     }
@@ -1488,6 +1546,35 @@ private fun JsonObject.toUserAccount(profile: JsonObject = this): UserAccountUi?
         followerCount = profile.int("followeds"),
         listenCount = int("listenSongs").takeIf { it > 0 } ?: profile.int("listenSongs"),
     )
+}
+
+private fun PlaylistDetailUi.toCacheEntity(json: Json): PlaylistDetailCacheEntity {
+    return PlaylistDetailCacheEntity(
+        playlistId = id,
+        name = name,
+        coverUrl = coverUrl,
+        description = description,
+        playCount = playCount,
+        subscribedCount = subscribedCount,
+        trackCount = trackCount,
+        tracksJson = json.encodeToString(tracks),
+        cachedAt = System.currentTimeMillis(),
+    )
+}
+
+private fun PlaylistDetailCacheEntity.toPlaylistDetailUi(json: Json): PlaylistDetailUi? {
+    return runCatching {
+        PlaylistDetailUi(
+            id = playlistId,
+            name = name,
+            coverUrl = coverUrl,
+            description = description,
+            playCount = playCount,
+            subscribedCount = subscribedCount,
+            trackCount = trackCount,
+            tracks = json.decodeFromString<List<TrackItem>>(tracksJson),
+        )
+    }.getOrNull()
 }
 
 private val JsonElement.obj: JsonObject

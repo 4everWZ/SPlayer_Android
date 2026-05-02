@@ -6,7 +6,13 @@ import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.sp
 
 private val NativeDarkColorScheme = darkColorScheme(
     primary = Color(0xFFF04D5D),
@@ -42,15 +48,80 @@ private val NativeLightColorScheme = lightColorScheme(
     error = Color(0xFFBA1A1A),
 )
 
+private val NativeTypography = Typography(
+    headlineMedium = TextStyle(
+        fontSize = 20.sp,
+        lineHeight = 26.sp,
+        fontWeight = FontWeight.SemiBold,
+    ),
+    headlineSmall = TextStyle(
+        fontSize = 18.sp,
+        lineHeight = 24.sp,
+        fontWeight = FontWeight.SemiBold,
+    ),
+    titleLarge = TextStyle(
+        fontSize = 18.sp,
+        lineHeight = 24.sp,
+        fontWeight = FontWeight.SemiBold,
+    ),
+    titleMedium = TextStyle(
+        fontSize = 15.sp,
+        lineHeight = 21.sp,
+        fontWeight = FontWeight.Medium,
+    ),
+    titleSmall = TextStyle(
+        fontSize = 14.sp,
+        lineHeight = 19.sp,
+        fontWeight = FontWeight.Medium,
+    ),
+    bodyLarge = TextStyle(
+        fontSize = 14.sp,
+        lineHeight = 20.sp,
+        fontWeight = FontWeight.Normal,
+    ),
+    bodyMedium = TextStyle(
+        fontSize = 13.sp,
+        lineHeight = 18.sp,
+        fontWeight = FontWeight.Normal,
+    ),
+    bodySmall = TextStyle(
+        fontSize = 11.sp,
+        lineHeight = 16.sp,
+        fontWeight = FontWeight.Normal,
+    ),
+    labelLarge = TextStyle(
+        fontSize = 12.sp,
+        lineHeight = 16.sp,
+        fontWeight = FontWeight.Medium,
+    ),
+    labelMedium = TextStyle(
+        fontSize = 11.sp,
+        lineHeight = 15.sp,
+        fontWeight = FontWeight.Medium,
+    ),
+    labelSmall = TextStyle(
+        fontSize = 10.sp,
+        lineHeight = 13.sp,
+        fontWeight = FontWeight.Medium,
+    ),
+)
+
 @Composable
 fun SPlayerNativeTheme(
     darkTheme: Boolean = true,
     content: @Composable () -> Unit,
 ) {
-    MaterialTheme(
-        colorScheme = if (darkTheme) NativeDarkColorScheme else NativeLightColorScheme,
-        typography = Typography(),
-        shapes = Shapes(),
-        content = content,
+    val density = LocalDensity.current
+    val cappedDensity = Density(
+        density = density.density,
+        fontScale = density.fontScale.coerceAtMost(1.0f),
     )
+    CompositionLocalProvider(LocalDensity provides cappedDensity) {
+        MaterialTheme(
+            colorScheme = if (darkTheme) NativeDarkColorScheme else NativeLightColorScheme,
+            typography = NativeTypography,
+            shapes = Shapes(),
+            content = content,
+        )
+    }
 }

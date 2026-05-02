@@ -75,8 +75,31 @@ class ViewModelSupportTest {
     @Test
     fun `resolveMaxPlaylistPageRequests adds one guard page beyond expected remaining pages`() {
         assertEquals(0, resolveMaxPlaylistPageRequests(loadedTrackCount = 10, trackCount = 10))
-        assertEquals(2, resolveMaxPlaylistPageRequests(loadedTrackCount = 0, trackCount = 200))
-        assertEquals(3, resolveMaxPlaylistPageRequests(loadedTrackCount = 80, trackCount = 420))
+        assertEquals(2, resolveMaxPlaylistPageRequests(loadedTrackCount = 0, trackCount = 500))
+        assertEquals(5, resolveMaxPlaylistPageRequests(loadedTrackCount = 80, trackCount = 1773))
+    }
+
+    @Test
+    fun `resolvePlaylistPlaybackRequest uses currently loaded tracks without waiting for hidden full list`() {
+        val loadedTracks = (1L..80L).map(::sampleTrack)
+        val clickedTrack = sampleTrack(id = 72L)
+
+        val request = resolvePlaylistPlaybackRequest(
+            clickedTrackId = clickedTrack.id,
+            loadedTracks = loadedTracks,
+            clickedIndex = 70,
+        )
+
+        assertEquals(80, request.tracks.size)
+        assertEquals(71, request.startIndex)
+        assertEquals(72L, request.tracks[request.startIndex].id)
+    }
+
+    @Test
+    fun `shouldShowRefreshLoading hides restored page refresh animation when content exists`() {
+        assertEquals(true, shouldShowRefreshLoading(hasContent = false, showLoading = false))
+        assertEquals(false, shouldShowRefreshLoading(hasContent = true, showLoading = false))
+        assertEquals(true, shouldShowRefreshLoading(hasContent = true, showLoading = true))
     }
 
     private fun sampleComment(id: Long): CommentItem {

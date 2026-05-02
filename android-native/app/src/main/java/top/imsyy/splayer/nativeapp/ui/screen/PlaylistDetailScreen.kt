@@ -29,16 +29,15 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
-import kotlinx.coroutines.launch
 import top.imsyy.splayer.nativeapp.model.TrackItem
 import top.imsyy.splayer.nativeapp.ui.PlaylistDetailViewModel
+import top.imsyy.splayer.nativeapp.ui.resolvePlaylistPlaybackRequest
 
 @Composable
 fun PlaylistDetailScreen(
@@ -50,7 +49,6 @@ fun PlaylistDetailScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val playlist = state.playlist
     val listState = rememberLazyListState()
-    val scope = rememberCoroutineScope()
     val shouldLoadMore by remember(state.hasMore, state.isAppending, playlist?.tracks?.size) {
         derivedStateOf {
             val lastVisibleIndex = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: return@derivedStateOf false
@@ -121,11 +119,8 @@ fun PlaylistDetailScreen(
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         FilledTonalButton(
                             onClick = {
-                                scope.launch {
-                                    val fullTracks = viewModel.ensureAllTracksLoaded()
-                                    if (fullTracks.isNotEmpty()) {
-                                        onPlayAll(fullTracks)
-                                    }
+                                if (data.tracks.isNotEmpty()) {
+                                    onPlayAll(data.tracks)
                                 }
                             },
                             enabled = data.tracks.isNotEmpty(),
@@ -170,7 +165,16 @@ fun PlaylistDetailScreen(
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { onPlayTrack(data.tracks, index) },
+                        .clickable {
+                            val request = resolvePlaylistPlaybackRequest(
+                                clickedTrackId = track.id,
+                                loadedTracks = data.tracks,
+                                clickedIndex = index,
+                            )
+                            if (request.tracks.isNotEmpty()) {
+                                onPlayTrack(request.tracks, request.startIndex)
+                            }
+                        },
                 ) {
                     Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text(track.name, style = MaterialTheme.typography.titleMedium, maxLines = 1)
