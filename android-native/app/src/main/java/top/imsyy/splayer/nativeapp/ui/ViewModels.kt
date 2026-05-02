@@ -28,6 +28,8 @@ import kotlinx.coroutines.launch
 import top.imsyy.splayer.nativeapp.BuildConfig
 import top.imsyy.splayer.nativeapp.AppSettingsProto
 import top.imsyy.splayer.nativeapp.data.local.AppSettingsStore
+import top.imsyy.splayer.nativeapp.data.local.configuredApiRoot
+import top.imsyy.splayer.nativeapp.data.local.configuredUnlockServerMode
 import top.imsyy.splayer.nativeapp.data.repository.LyricsPreferences
 import top.imsyy.splayer.nativeapp.data.repository.QueueRepository
 import top.imsyy.splayer.nativeapp.data.repository.SPlayerRemoteRepository
@@ -1471,6 +1473,8 @@ internal fun resolveCommentPreviewCount(
 data class SettingsUiState(
     val currentUser: UserAccountUi? = null,
     val apiRoot: String = "",
+    val apiRootError: String? = null,
+    val apiRootSavedMessage: String? = null,
     val appMode: String = BuildConfig.APP_MODE,
     val qrImageUrl: String? = null,
     val qrStatusText: String = "未开始",
@@ -1502,7 +1506,7 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             appSettingsStore.settings.collect { settings ->
                 _uiState.value = _uiState.value.copy(
-                    apiRoot = settings.apiRoot,
+                    apiRoot = configuredApiRoot(settings),
                     currentUser = settings.toStoredUserOrNull(),
                     showTranslation = settings.showTranslation,
                     showRomanized = settings.showRoma,
@@ -1510,7 +1514,7 @@ class SettingsViewModel @Inject constructor(
                     showQueueCount = settings.showQueueCount,
                     lyricFontScale = settings.lyricFontScale.coerceIn(85, 135),
                     themeMode = ThemeMode.fromRaw(settings.themeMode),
-                    unlockServerMode = UnlockServerMode.fromRaw(settings.unlockServerMode),
+                    unlockServerMode = configuredUnlockServerMode(settings),
                 )
             }
         }
@@ -1652,7 +1656,56 @@ class SettingsViewModel @Inject constructor(
 
     fun setUnlockServerMode(mode: UnlockServerMode) {
         viewModelScope.launch {
+            if (mode == UnlockServerMode.EXTERNAL && _uiState.value.apiRoot.isBlank()) {
+                appSettingsStore.setUnlockServerMode(UnlockServerMode.LOCAL)
+                _uiState.value = _uiState.value.copy(
+                    unlockServerMode = UnlockServerMode.LOCAL,
+                    apiRootError = "使用外部 unlock 前请先保存 API 根路径",
+                    apiRootSavedMessage = null,
+                )
+                return@launch
+            }
             appSettingsStore.setUnlockServerMode(mode)
+            _uiState.value = _uiState.value.copy(
+                unlockServerMode = mode,
+                apiRootError = null,
+                apiRootSavedMessage = if (mode == UnlockServerMode.LOCAL) {
+                    "已切换为原生本地 unlock"
+                } else {
+                    "已切换为外部 unlock 服务器"
+                },
+            )
+        }
+    }
+
+    fun setApiRoot(rawApiRoot: String) {
+        viewModelScope.launch {
+            var normalizedApiRoot = ""
+            runCatching {
+                appSettingsStore.setApiRoot(rawApiRoot).also { normalized ->
+                    normalizedApiRoot = normalized
+                }
+            }.onSuccess {
+                _uiState.value = _uiState.value.copy(
+                    apiRoot = normalizedApiRoot,
+                    unlockServerMode = if (normalizedApiRoot.isBlank()) {
+                        UnlockServerMode.LOCAL
+                    } else {
+                        _uiState.value.unlockServerMode
+                    },
+                    apiRootError = null,
+                    apiRootSavedMessage = if (normalizedApiRoot.isBlank()) {
+                        "已清空 API 根路径，并切换为原生本地 unlock"
+                    } else {
+                        "API 根路径已保存"
+                    },
+                )
+            }.onFailure { error ->
+                _uiState.value = _uiState.value.copy(
+                    apiRootError = error.message ?: "API 根路径格式错误",
+                    apiRootSavedMessage = null,
+                )
+            }
         }
     }
 

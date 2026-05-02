@@ -6,7 +6,9 @@ import androidx.datastore.dataStore
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
+import java.net.URI
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
@@ -113,8 +115,25 @@ class AppSettingsStore @Inject constructor(
     }
 
     suspend fun setUnlockServerMode(mode: UnlockServerMode) {
-        update { current -> current.toBuilder().setUnlockServerMode(mode.rawValue).build() }
+        update { current ->
+            current.toBuilder()
+                .setUnlockServerMode(mode.rawValue)
+                .setUnlockServerModeUserConfigured(true)
+                .build()
+        }
     }
+
+    suspend fun setApiRoot(rawApiRoot: String): String {
+        val normalized = normalizeApiRoot(rawApiRoot)
+        update { current ->
+            current.withConfiguredApiRoot(normalized)
+        }
+        return normalized
+    }
+
+    suspend fun currentApiRoot(): String = configuredApiRoot(store.data.first())
+
+    suspend fun currentUnlockServerMode(): UnlockServerMode = configuredUnlockServerMode(store.data.first())
 
     fun buildCookieHeader(): String {
         val current = settings.value
@@ -126,10 +145,46 @@ class AppSettingsStore @Inject constructor(
     }
 
     val apiRoot: String
-        get() = settings.value.apiRoot.ifBlank { AppSettingsSerializer.defaultValue.apiRoot }
+        get() = configuredApiRoot(settings.value)
 
     val unlockServerMode: UnlockServerMode
-        get() = UnlockServerMode.fromRaw(settings.value.unlockServerMode)
+        get() = configuredUnlockServerMode(settings.value)
+}
+
+internal fun configuredApiRoot(settings: AppSettingsProto): String {
+    return settings.apiRoot.takeIf { settings.apiRootUserConfigured }.orEmpty()
+}
+
+internal fun configuredUnlockServerMode(settings: AppSettingsProto): UnlockServerMode {
+    if (!settings.unlockServerModeUserConfigured) return UnlockServerMode.LOCAL
+    if (configuredApiRoot(settings).isBlank()) return UnlockServerMode.LOCAL
+    return UnlockServerMode.fromRaw(settings.unlockServerMode)
+}
+
+internal fun AppSettingsProto.withConfiguredApiRoot(normalizedApiRoot: String): AppSettingsProto {
+    val builder = toBuilder()
+        .setApiRoot(normalizedApiRoot)
+        .setApiRootUserConfigured(normalizedApiRoot.isNotBlank())
+    if (normalizedApiRoot.isBlank()) {
+        builder
+            .setUnlockServerMode(UnlockServerMode.LOCAL.rawValue)
+            .setUnlockServerModeUserConfigured(false)
+    }
+    return builder.build()
+}
+
+internal fun normalizeApiRoot(rawApiRoot: String): String {
+    val trimmed = rawApiRoot.trim().trimEnd('/')
+    if (trimmed.isBlank()) return ""
+    val uri = runCatching { URI(trimmed) }.getOrNull()
+    val scheme = uri?.scheme.orEmpty().lowercase()
+    require(scheme == "http" || scheme == "https") {
+        "API 根路径必须以 http:// 或 https:// 开头"
+    }
+    require(!uri?.host.isNullOrBlank()) {
+        "API 根路径必须包含主机名"
+    }
+    return trimmed
 }
 
 internal fun mergeCookieValue(current: String, incoming: String?): String {

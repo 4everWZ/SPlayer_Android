@@ -19,4 +19,6 @@ message AppSettingsProto {
   string account_avatar_url = 13;
   int32 theme_mode = 14;
   int32 unlock_server_mode = 15;
+  bool api_root_user_configured = 16;
+  bool unlock_server_mode_user_configured = 17;
 }

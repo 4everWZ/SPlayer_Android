@@ -74,7 +74,7 @@ Android 版不再依赖 `vercel.app/api/netease` 代理链。
 直接配置为你的 Oracle API 地址，例如：
 
 ```text
-VITE_API_ROOT=http://192.9.181.26/splayer
+VITE_API_ROOT=https://your-domain.com/splayer
 VITE_ANDROID_API_MODE=remote
 ```
 
@@ -264,7 +264,7 @@ V1.5 额外要求：
 新增移动端环境：
 
 ```text
-VITE_API_ROOT=http://192.9.181.26/splayer
+VITE_API_ROOT=https://your-domain.com/splayer
 VITE_ANDROID_API_MODE=remote|embedded
 ```
 

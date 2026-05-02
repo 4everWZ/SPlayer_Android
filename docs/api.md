@@ -10,7 +10,7 @@
 ## 基础信息
 
 - **本地基础 URL**: `http://localhost:25884/api`
-- **服务器基础 URL 示例**: `http://192.9.181.26/splayer`
+- **服务器基础 URL 示例**: `https://your-domain.com/splayer`
 - **响应格式**: JSON
 
 ## 统一响应格式

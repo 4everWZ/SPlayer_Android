@@ -6,6 +6,9 @@ on:
       - "**"
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build-android-native-debug:
     runs-on: ubuntu-latest
@@ -45,3 +48,35 @@ jobs:
         with:
           name: splayer-native-v2-debug-${{ steps.apk-version.outputs.version }}
           path: ${{ steps.apk-version.outputs.apk_name }}
+
+      - name: Publish native APK release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APK_NAME: ${{ steps.apk-version.outputs.apk_name }}
+          APK_VERSION: ${{ steps.apk-version.outputs.version }}
+        shell: bash
+        run: |
+          tag_name="android-native-debug"
+          release_title="Android Native Debug APK"
+          git tag -f "$tag_name" "$GITHUB_SHA"
+          git push -f origin "$tag_name"
+          cat > release_notes.md <<EOF
+          Android Native debug APK
+
+          - Version: ${APK_VERSION}
+          - Commit: ${GITHUB_SHA}
+          - Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+          EOF
+          if ! gh release view "$tag_name" >/dev/null 2>&1; then
+            gh release create "$tag_name" \
+              --title "$release_title" \
+              --notes-file release_notes.md \
+              --prerelease \
+              --target "$GITHUB_SHA"
+          fi
+          gh release edit "$tag_name" \
+            --title "$release_title" \
+            --notes-file release_notes.md \
+            --prerelease \
+            --target "$GITHUB_SHA"
+          gh release upload "$tag_name" "$APK_NAME" --clobber

@@ -22,7 +22,9 @@ import retrofit2.Retrofit
 import retrofit2.converter.scalars.ScalarsConverterFactory
 import top.imsyy.splayer.nativeapp.data.api.SPlayerApiService
 import top.imsyy.splayer.nativeapp.data.local.AppSettingsStore
+import top.imsyy.splayer.nativeapp.data.local.PlaylistDetailCacheDao
 import top.imsyy.splayer.nativeapp.data.local.SPlayerDatabase
+import top.imsyy.splayer.nativeapp.data.repository.SPlayerRemoteRepository
 
 @Qualifier
 annotation class ApplicationScope
@@ -114,7 +116,7 @@ object AppModule {
             .addInterceptor(requestCookieInterceptor)
             .addInterceptor(responseCookieInterceptor)
             .addInterceptor(HttpLoggingInterceptor().apply {
-                level = HttpLoggingInterceptor.Level.BASIC
+                level = HttpLoggingInterceptor.Level.NONE
             })
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(20, TimeUnit.SECONDS)
@@ -124,10 +126,9 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideRetrofit(appSettingsStore: AppSettingsStore, okHttpClient: OkHttpClient): Retrofit {
-        val baseUrl = appSettingsStore.apiRoot.trimEnd('/') + "/"
+    fun provideRetrofit(okHttpClient: OkHttpClient): Retrofit {
         return Retrofit.Builder()
-            .baseUrl(baseUrl)
+            .baseUrl("http://127.0.0.1/")
             .client(okHttpClient)
             .addConverterFactory(ScalarsConverterFactory.create())
             .build()
@@ -137,5 +138,20 @@ object AppModule {
     @Singleton
     fun provideApiService(retrofit: Retrofit): SPlayerApiService {
         return retrofit.create(SPlayerApiService::class.java)
+    }
+
+    @Provides
+    @Singleton
+    fun provideRemoteRepository(
+        api: SPlayerApiService,
+        appSettingsStore: AppSettingsStore,
+        playlistDetailCacheDao: PlaylistDetailCacheDao,
+    ): SPlayerRemoteRepository {
+        return SPlayerRemoteRepository(
+            api = api,
+            apiRootProvider = { appSettingsStore.currentApiRoot() },
+            requireApiRoot = true,
+            playlistDetailCacheDao = playlistDetailCacheDao,
+        )
     }
 }

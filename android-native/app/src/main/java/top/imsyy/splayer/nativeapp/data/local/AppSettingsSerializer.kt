@@ -5,14 +5,13 @@ import androidx.datastore.core.Serializer
 import java.io.InputStream
 import java.io.OutputStream
 import top.imsyy.splayer.nativeapp.AppSettingsProto
-import top.imsyy.splayer.nativeapp.BuildConfig
 import top.imsyy.splayer.nativeapp.model.ThemeMode
 import top.imsyy.splayer.nativeapp.model.UnlockServerMode
 
 object AppSettingsSerializer : Serializer<AppSettingsProto> {
     override val defaultValue: AppSettingsProto =
         AppSettingsProto.newBuilder()
-            .setApiRoot(BuildConfig.API_ROOT)
+            .setApiRoot("")
             .setPlayMode(0)
             .setShowTranslation(true)
             .setShowRoma(false)
@@ -21,6 +20,8 @@ object AppSettingsSerializer : Serializer<AppSettingsProto> {
             .setLyricFontScale(100)
             .setThemeMode(ThemeMode.DARK.rawValue)
             .setUnlockServerMode(UnlockServerMode.LOCAL.rawValue)
+            .setApiRootUserConfigured(false)
+            .setUnlockServerModeUserConfigured(false)
             .build()
 
     override suspend fun readFrom(input: InputStream): AppSettingsProto {

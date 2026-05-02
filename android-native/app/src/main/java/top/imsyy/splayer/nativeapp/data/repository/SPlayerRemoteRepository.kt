@@ -2,7 +2,6 @@ package top.imsyy.splayer.nativeapp.data.repository
 
 import java.util.LinkedHashMap
 import java.util.concurrent.ConcurrentHashMap
-import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.math.abs
 import kotlin.math.max
@@ -74,8 +73,10 @@ internal class BoundedMemoryCache<K, V>(
 }
 
 @Singleton
-class SPlayerRemoteRepository @Inject constructor(
+class SPlayerRemoteRepository(
     private val api: SPlayerApiService,
+    private val apiRootProvider: suspend () -> String = { "" },
+    private val requireApiRoot: Boolean = false,
     private val playlistDetailCacheDao: PlaylistDetailCacheDao? = null,
 ) {
     private companion object {
@@ -712,7 +713,7 @@ class SPlayerRemoteRepository @Inject constructor(
         tryOfficial: Boolean,
         enabledUnlockServers: List<String>,
     ): TrackSource {
-        if (tryOfficial) {
+        if (tryOfficial && canRequestConfiguredApi()) {
             for (level in officialLevels) {
                 val official = getNetease(
                     "song/url/v1",
@@ -724,7 +725,7 @@ class SPlayerRemoteRepository @Inject constructor(
                 ).array("data").firstOrNull()?.obj
 
                 val officialUrl = normalizeUrl(official?.string("url").orEmpty())
-                if (officialUrl.isNotBlank()) {
+                if (officialUrl.isNotBlank() && official?.isTrialPreviewUrl() != true) {
                     return TrackSource(
                         url = officialUrl,
                         quality = official?.string("level").orEmpty().ifBlank { level },
@@ -736,29 +737,39 @@ class SPlayerRemoteRepository @Inject constructor(
         }
 
         for (server in enabledUnlockServers) {
-            val result = if (server == NATIVE_NETEASE_UNLOCK_SOURCE) {
-                getDirectNeteaseUnlock(track.id)
-            } else {
-                getUnblock(
-                    server = server,
-                    params = if (server == "netease") {
-                        mapOf("id" to track.id.toString(), "noCookie" to "true")
+            val (result, sourceName) = when (server) {
+                NATIVE_NETEASE_UNLOCK_SOURCE -> getDirectNeteaseUnlock(track.id) to NATIVE_NETEASE_UNLOCK_SOURCE
+                "netease" -> {
+                    val external = runCatching {
+                        getUnblock(
+                            server = server,
+                            params = mapOf("id" to track.id.toString(), "noCookie" to "true"),
+                        )
+                    }.getOrNull()
+                    if (normalizeUrl(external?.string("url").orEmpty()).isNotBlank()) {
+                        requireNotNull(external) to server
                     } else {
-                        mapOf(
+                        getDirectNeteaseUnlock(track.id) to NATIVE_NETEASE_UNLOCK_SOURCE
+                    }
+                }
+                else -> {
+                    getUnblock(
+                        server = server,
+                        params = mapOf(
                             "keyword" to track.keyword,
                             "songName" to track.name,
                             "artist" to track.artists,
                             "noCookie" to "true",
-                        )
-                    },
-                )
+                        ),
+                    ) to server
+                }
             }
             val url = normalizeUrl(result.string("url"))
             if (url.isNotBlank()) {
                 return TrackSource(
                     url = url,
                     quality = result.string("br"),
-                    source = server,
+                    source = sourceName,
                     unlocked = true,
                 )
             }
@@ -812,8 +823,23 @@ class SPlayerRemoteRepository @Inject constructor(
     }
 
     private suspend fun getRaw(path: String, params: Map<String, String> = emptyMap()): String {
-        return api.get(path, params).string()
+        return api.get(resolveApiUrl(path), params).string()
     }
+
+    private suspend fun resolveApiUrl(path: String): String {
+        val trimmedPath = path.trim()
+        if (trimmedPath.startsWith("http://") || trimmedPath.startsWith("https://")) {
+            return trimmedPath
+        }
+        val apiRoot = apiRootProvider().trim().trimEnd('/')
+        if (apiRoot.isBlank() && !requireApiRoot) return trimmedPath
+        check(apiRoot.isNotBlank()) {
+            "请先在设置中填写 API 根路径"
+        }
+        return "$apiRoot/${trimmedPath.trimStart('/')}"
+    }
+
+    private suspend fun canRequestConfiguredApi(): Boolean = !requireApiRoot || apiRootProvider().isNotBlank()
 
     private fun parseJsonObjectBody(rawBody: String): JsonObject {
         return json.parseToJsonElement(extractFirstJsonEnvelope(rawBody)).jsonObject
@@ -1747,6 +1773,8 @@ private val JsonElement.obj: JsonObject
     get() = this as? JsonObject ?: JsonObject(emptyMap())
 
 private fun JsonObject.obj(key: String): JsonObject = this[key] as? JsonObject ?: JsonObject(emptyMap())
+
+private fun JsonObject.isTrialPreviewUrl(): Boolean = obj("freeTrialInfo").isNotEmpty()
 
 private fun JsonObject.array(key: String): List<JsonElement> = (this[key] as? JsonArray)?.toList().orEmpty()
 

@@ -18,6 +18,82 @@ import top.imsyy.splayer.nativeapp.model.TrackItem
 
 class SPlayerRemoteRepositoryTest {
     @Test
+    fun `fetchLoginState uses configured api root for netease request`() = runBlocking {
+        val apiRoot = "https://api.example.com/splayer"
+        val api = FakeApiService(
+            responses = mapOf(
+                "$apiRoot/netease/login/status" to """
+                    {
+                      "data": {
+                        "account": { "id": 42 },
+                        "profile": { "userId": 42, "nickname": "远程账号", "avatarUrl": "https://example.com/avatar.jpg" }
+                      }
+                    }
+                """.trimIndent(),
+                "$apiRoot/netease/user/account" to """
+                    {
+                      "profile": { "userId": 42, "nickname": "远程账号", "avatarUrl": "https://example.com/avatar.jpg" }
+                    }
+                """.trimIndent(),
+            ),
+        )
+        val repository = SPlayerRemoteRepository(
+            api = api,
+            apiRootProvider = { apiRoot },
+            requireApiRoot = true,
+        )
+
+        val user = repository.fetchLoginState()
+
+        requireNotNull(user)
+        assertEquals(42L, user.userId)
+        assertEquals(
+            listOf("$apiRoot/netease/login/status", "$apiRoot/netease/user/account"),
+            api.calls.map { call -> call.url },
+        )
+    }
+
+    @Test
+    fun `fetchLoginState observes api root provider changes after blank start`() = runBlocking {
+        var apiRoot = ""
+        val configuredRoot = "https://api.example.com/splayer"
+        val api = FakeApiService(
+            responses = mapOf(
+                "$configuredRoot/netease/login/status" to """
+                    {
+                      "data": {
+                        "account": { "id": 43 },
+                        "profile": { "userId": 43, "nickname": "更新账号" }
+                      }
+                    }
+                """.trimIndent(),
+                "$configuredRoot/netease/user/account" to """
+                    {
+                      "profile": { "userId": 43, "nickname": "更新账号" }
+                    }
+                """.trimIndent(),
+            ),
+        )
+        val repository = SPlayerRemoteRepository(
+            api = api,
+            apiRootProvider = { apiRoot },
+            requireApiRoot = true,
+        )
+
+        val missingRoot = runCatching { repository.fetchLoginState() }.exceptionOrNull()
+        apiRoot = configuredRoot
+        val user = repository.fetchLoginState()
+
+        assertEquals("请先在设置中填写 API 根路径", missingRoot?.message)
+        requireNotNull(user)
+        assertEquals(43L, user.userId)
+        assertEquals(
+            listOf("$configuredRoot/netease/login/status", "$configuredRoot/netease/user/account"),
+            api.calls.map { call -> call.url },
+        )
+    }
+
+    @Test
     fun `fetchDiscoveryHome aggregates playlist songs artists albums and toplist`() = runBlocking {
         val repository = SPlayerRemoteRepository(
             api = FakeApiService(
@@ -577,6 +653,85 @@ class SPlayerRemoteRepositoryTest {
         val directCall = api.calls.first { it.url == "https://music-api.gdstudio.xyz/api.php" }
         assertEquals("url", directCall.params["types"])
         assertEquals("909", directCall.params["id"])
+    }
+
+    @Test
+    fun `resolveSongSource skips official trial url and continues with unlock source`() = runBlocking {
+        val api = FakeApiService(
+            responses = mapOf(
+                "netease/song/url/v1" to """
+                    {
+                      "data": [
+                        {
+                          "url": "http://m701.music.126.net/trial.mp3",
+                          "level": "standard",
+                          "freeTrialInfo": { "start": 0, "end": 30000 }
+                        }
+                      ]
+                    }
+                """.trimIndent(),
+                "https://music-api.gdstudio.xyz/api.php" to """
+                    {
+                      "url": "http://m801.music.126.net/full.mp3",
+                      "br": 320000
+                    }
+                """.trimIndent(),
+            ),
+        )
+        val repository = SPlayerRemoteRepository(api = api)
+
+        val source = repository.resolveSongSource(
+            track = TrackItem(
+                id = 910L,
+                name = "试听歌曲",
+                artists = "测试歌手",
+                album = "测试专辑",
+                coverUrl = "",
+                durationMs = 180_000L,
+            ),
+            tryOfficial = true,
+            enabledUnlockServers = listOf("native-netease"),
+        )
+
+        assertEquals("https://m801.music.126.net/full.mp3", source.url)
+        assertEquals("native-netease", source.source)
+        assertTrue(source.unlocked)
+        assertTrue(api.calls.any { it.url == "https://music-api.gdstudio.xyz/api.php" })
+    }
+
+    @Test
+    fun `resolveSongSource falls back to direct netease when external netease returns no url`() = runBlocking {
+        val api = FakeApiService(
+            responses = mapOf(
+                "unblock/netease" to """{"url": ""}""",
+                "https://music-api.gdstudio.xyz/api.php" to """
+                    {
+                      "url": "http://m801.music.126.net/external-fallback.mp3",
+                      "br": 320000
+                    }
+                """.trimIndent(),
+            ),
+        )
+        val repository = SPlayerRemoteRepository(api = api)
+
+        val source = repository.resolveSongSource(
+            track = TrackItem(
+                id = 911L,
+                name = "外部解锁歌曲",
+                artists = "测试歌手",
+                album = "测试专辑",
+                coverUrl = "",
+                durationMs = 180_000L,
+            ),
+            tryOfficial = false,
+            enabledUnlockServers = listOf("netease"),
+        )
+
+        assertEquals("https://m801.music.126.net/external-fallback.mp3", source.url)
+        assertEquals("native-netease", source.source)
+        assertTrue(source.unlocked)
+        assertTrue(api.calls.any { it.url == "unblock/netease" })
+        assertTrue(api.calls.any { it.url == "https://music-api.gdstudio.xyz/api.php" })
     }
 
     @Test

@@ -2,8 +2,10 @@
 
 ## 根路径
 
-- `BuildConfig.API_ROOT`
-- 默认值：`http://192.9.181.26/splayer`
+- APK 不内置私有 API 根路径
+- 默认 `apiRoot` 为空，用户在 Android 设置页手动填写
+- 外部服务器地址必须填写完整根路径，例如 `https://example.com/splayer` 或局域网地址
+- 端口按服务实际部署或反代配置填写，客户端不会自动补端口
 
 ## 总原则
 
@@ -38,7 +40,8 @@
 
 - Android 不启动桌面端 Node/Electron 本地 unlock 服务
 - 默认 `unlockServerMode=LOCAL`，由 Android 原生网络请求按需解析网易云直连解锁候选
-- 用户选择外部服务器时切到 `unlockServerMode=EXTERNAL`，只请求当前 `API_ROOT` 下的 `/unblock/*`
+- 用户选择外部服务器时切到 `unlockServerMode=EXTERNAL`，请求当前设置页 `apiRoot` 下的 `/unblock/*`
+- `apiRoot` 未配置时，登录、推荐、搜索、歌词等远程 API 不发起请求；本地 unlock 仍可按需请求原生直连解锁候选
 - 客户端不得再叠加会员可用性判断、广告解锁判断或 VIP 导流逻辑
 - 即便远程服务具备解锁能力，客户端仍要保留官方源与多解锁源故障转移链
 
@@ -140,6 +143,8 @@
 2. `song/url/v1?level=higher`
 3. `song/url/v1?level=standard`
 
+如果官方接口返回 `freeTrialInfo`，默认视为试听 URL，不作为最终播放源，继续走解锁链路。
+
 ### 解锁源
 
 `unlockServerMode=LOCAL`：
@@ -152,6 +157,8 @@
 2. `unblock/kuwo`
 3. `unblock/gequbao`
 4. `unblock/bodian`
+
+`unblock/netease` 失败或返回空 URL 时，按 desktop 对齐回退到 Android 原生网易云直连解锁候选。
 
 所有音源 URL 在进入播放器前统一正规化。
 

@@ -13,22 +13,29 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.draw.clip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.input.ImeAction
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
@@ -41,6 +48,10 @@ fun SettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    var apiRootInput by rememberSaveable { mutableStateOf(state.apiRoot) }
+    LaunchedEffect(state.apiRoot) {
+        apiRootInput = state.apiRoot
+    }
     DisposableEffect(viewModel) {
         onDispose {
             viewModel.stopQrLogin()
@@ -169,7 +180,32 @@ fun SettingsScreen(
                 description = "默认使用原生本地解锁；选择外部服务器时只走 API 根路径提供的解锁服务",
             ) {
                 Text("模式：${state.appMode}")
-                Text(state.apiRoot, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                OutlinedTextField(
+                    value = apiRootInput,
+                    onValueChange = { apiRootInput = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("API 根路径") },
+                    placeholder = { Text("https://your-domain.com/splayer") },
+                    singleLine = true,
+                    isError = state.apiRootError != null,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                )
+                Text(
+                    "外部服务器请填写完整根路径。端口按你的服务实际监听端口填写，应用不会自动补端口。",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                state.apiRootError?.let { message ->
+                    Text(message, color = MaterialTheme.colorScheme.error)
+                }
+                state.apiRootSavedMessage?.let { message ->
+                    Text(message, color = MaterialTheme.colorScheme.primary)
+                }
+                Button(
+                    onClick = { viewModel.setApiRoot(apiRootInput) },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("保存 API 根路径")
+                }
                 SettingsSwitchRow(
                     title = "使用外部 unlock 服务器",
                     checked = state.unlockServerMode == UnlockServerMode.EXTERNAL,
@@ -181,9 +217,9 @@ fun SettingsScreen(
                 )
                 Text(
                     if (state.unlockServerMode == UnlockServerMode.EXTERNAL) {
-                        "当前播放源解析会跳过原生本地解锁，只请求外部 /unblock/*。"
+                        "当前播放源解析会先请求 API 根路径下的 /unblock/*；netease 无结果时回退到原生直连解锁。"
                     } else {
-                        "当前播放源解析优先保留原生本地解锁，不加载桌面本地 unlock 服务。"
+                        "当前播放源解析使用原生本地解锁，不加载桌面本地 unlock 服务。登录、发现和歌单仍需要 API 根路径。"
                     },
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -233,7 +269,10 @@ fun SettingsScreen(
                 description = "性能验收将按 batterystats、gfxinfo、cpuinfo 与 Perfetto 留痕",
             ) {
                 Text("包模式：${state.appMode}")
-                Text("API 根路径：${state.apiRoot}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    "API 根路径：${state.apiRoot.ifBlank { "未配置" }}",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 Text(
                     "Unlock：${if (state.unlockServerMode == UnlockServerMode.EXTERNAL) "外部服务器" else "原生本地"}",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,

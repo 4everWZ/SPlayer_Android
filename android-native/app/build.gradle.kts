@@ -1,5 +1,3 @@
-import java.util.Properties
-
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -9,15 +7,6 @@ plugins {
     kotlin("plugin.serialization") version "2.0.21"
     id("com.google.protobuf")
 }
-
-val localProperties = Properties()
-val localPropertiesFile = rootProject.file("local.properties")
-if (localPropertiesFile.exists()) {
-    localPropertiesFile.inputStream().use(localProperties::load)
-}
-
-val defaultApiRoot = "http://192.9.181.26/splayer"
-val apiRoot = localProperties.getProperty("splayer.apiRoot", defaultApiRoot)
 
 android {
     namespace = "top.imsyy.splayer.nativeapp"
@@ -35,7 +24,6 @@ android {
             useSupportLibrary = true
         }
 
-        buildConfigField("String", "API_ROOT", "\"$apiRoot\"")
         buildConfigField("String", "APP_MODE", "\"remote\"")
     }
 

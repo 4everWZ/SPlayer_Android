@@ -73,9 +73,117 @@ class AppSettingsContractTest {
     }
 
     @Test
+    fun `default settings do not include private api root`() {
+        assertEquals("", AppSettingsSerializer.defaultValue.apiRoot)
+    }
+
+    @Test
+    fun `configuredApiRoot ignores legacy value without user configured marker`() {
+        val settings = AppSettingsProto.newBuilder()
+            .setApiRoot("https://legacy.example.com/splayer")
+            .setApiRootUserConfigured(false)
+            .build()
+
+        assertEquals("", configuredApiRoot(settings))
+    }
+
+    @Test
+    fun `configuredApiRoot returns explicitly configured api root`() {
+        val settings = AppSettingsProto.newBuilder()
+            .setApiRoot("https://example.com/splayer")
+            .setApiRootUserConfigured(true)
+            .build()
+
+        assertEquals("https://example.com/splayer", configuredApiRoot(settings))
+    }
+
+    @Test
+    fun `normalizeApiRoot trims trailing slash and keeps explicit port`() {
+        assertEquals(
+            "http://192.168.1.10:25884/splayer",
+            normalizeApiRoot("  http://192.168.1.10:25884/splayer/  "),
+        )
+    }
+
+    @Test
+    fun `normalizeApiRoot allows blank value for local default`() {
+        assertEquals("", normalizeApiRoot("   "))
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun `normalizeApiRoot rejects url without http scheme`() {
+        normalizeApiRoot("192.168.1.10:25884/splayer")
+    }
+
+    @Test
     fun `unlockServerMode falls back to local when value unknown`() {
         assertEquals(UnlockServerMode.LOCAL, UnlockServerMode.fromRaw(-1))
         assertEquals(UnlockServerMode.LOCAL, UnlockServerMode.fromRaw(0))
         assertEquals(UnlockServerMode.EXTERNAL, UnlockServerMode.fromRaw(1))
+    }
+
+    @Test
+    fun `configuredUnlockServerMode keeps legacy external value local without configured api root`() {
+        val settings = AppSettingsProto.newBuilder()
+            .setApiRoot("https://legacy.example.com/splayer")
+            .setApiRootUserConfigured(false)
+            .setUnlockServerMode(UnlockServerMode.EXTERNAL.rawValue)
+            .build()
+
+        assertEquals(UnlockServerMode.LOCAL, configuredUnlockServerMode(settings))
+    }
+
+    @Test
+    fun `configuredUnlockServerMode ignores legacy external value even when api root exists`() {
+        val settings = AppSettingsProto.newBuilder()
+            .setApiRoot("https://legacy.example.com/splayer")
+            .setApiRootUserConfigured(true)
+            .setUnlockServerMode(UnlockServerMode.EXTERNAL.rawValue)
+            .setUnlockServerModeUserConfigured(false)
+            .build()
+
+        assertEquals(UnlockServerMode.LOCAL, configuredUnlockServerMode(settings))
+    }
+
+    @Test
+    fun `configuredUnlockServerMode keeps external when api root was explicitly configured`() {
+        val settings = AppSettingsProto.newBuilder()
+            .setApiRoot("https://example.com/splayer")
+            .setApiRootUserConfigured(true)
+            .setUnlockServerMode(UnlockServerMode.EXTERNAL.rawValue)
+            .setUnlockServerModeUserConfigured(true)
+            .build()
+
+        assertEquals(UnlockServerMode.EXTERNAL, configuredUnlockServerMode(settings))
+    }
+
+    @Test
+    fun `withConfiguredApiRoot clears legacy external mode when api root is blank or legacy`() {
+        val legacyExternal = AppSettingsProto.newBuilder()
+            .setApiRoot("https://legacy.example.com/splayer")
+            .setApiRootUserConfigured(false)
+            .setUnlockServerMode(UnlockServerMode.EXTERNAL.rawValue)
+            .build()
+
+        val cleared = legacyExternal.withConfiguredApiRoot("")
+
+        assertEquals("", configuredApiRoot(cleared))
+        assertEquals(UnlockServerMode.LOCAL, configuredUnlockServerMode(cleared))
+        assertEquals(UnlockServerMode.LOCAL.rawValue, cleared.unlockServerMode)
+        assertEquals(false, cleared.unlockServerModeUserConfigured)
+    }
+
+    @Test
+    fun `withConfiguredApiRoot does not force external mode when api root is saved`() {
+        val local = AppSettingsProto.newBuilder()
+            .setUnlockServerMode(UnlockServerMode.LOCAL.rawValue)
+            .setUnlockServerModeUserConfigured(true)
+            .build()
+
+        val saved = local.withConfiguredApiRoot("https://example.com/splayer")
+
+        assertEquals("https://example.com/splayer", configuredApiRoot(saved))
+        assertEquals(UnlockServerMode.LOCAL, configuredUnlockServerMode(saved))
+        assertEquals(true, saved.unlockServerModeUserConfigured)
     }
 }

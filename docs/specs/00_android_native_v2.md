@@ -6,7 +6,7 @@ Android 端主线固定为 `android-native/` 原生工程，当前阶段只交�
 
 - 技术栈：Kotlin + Jetpack Compose + Hilt + Retrofit + Room + DataStore + Media3
 - 接入模式：`remote`
-- 服务根路径：`http://192.9.181.26/splayer`
+- 服务根路径：用户在 Android 设置页填写，例如 `https://your-domain.com/splayer`
 - 业务语义：与 `SPlayer desktop` 对齐
 - 旧 `Capacitor` 线：冻结为 legacy，只保留应急修复
 
