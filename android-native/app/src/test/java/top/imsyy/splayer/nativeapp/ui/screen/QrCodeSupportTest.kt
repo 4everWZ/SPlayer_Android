@@ -18,4 +18,10 @@ class QrCodeSupportTest {
 
         assertNull(payload)
     }
+
+    @Test
+    fun `resolveSettingsQrImageSizeDp makes login qr visibly larger without overflowing narrow screens`() {
+        assertEquals(280, resolveSettingsQrImageSizeDp(360))
+        assertEquals(196, resolveSettingsQrImageSizeDp(260))
+    }
 }

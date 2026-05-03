@@ -38,8 +38,22 @@ class SettingsViewModelLoginTest {
         assertFalse(settingsViewModel.contains("loginWithCaptcha"))
     }
 
+    @Test
+    fun `settings surface exposes concurrent playback switch`() {
+        val settingsScreen = File("src/main/java/top/imsyy/splayer/nativeapp/ui/screen/SettingsScreen.kt").readText()
+        val viewModels = readViewModelsSource()
+
+        assertTrue(settingsScreen.contains("允许与其他应用同时播放"))
+        assertTrue(settingsScreen.contains("state.allowConcurrentPlayback"))
+        assertTrue(viewModels.contains("val allowConcurrentPlayback: Boolean = false"))
+        assertTrue(viewModels.contains("fun setAllowConcurrentPlayback"))
+    }
+
     private fun readSettingsViewModelSource(): String {
-        val source = File("src/main/java/top/imsyy/splayer/nativeapp/ui/ViewModels.kt").readText()
-        return source.substringAfter("class SettingsViewModel")
+        return readViewModelsSource().substringAfter("class SettingsViewModel")
+    }
+
+    private fun readViewModelsSource(): String {
+        return File("src/main/java/top/imsyy/splayer/nativeapp/ui/ViewModels.kt").readText()
     }
 }

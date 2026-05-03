@@ -22,6 +22,7 @@ object AppSettingsSerializer : Serializer<AppSettingsProto> {
             .setUnlockServerMode(UnlockServerMode.LOCAL.rawValue)
             .setApiRootUserConfigured(false)
             .setUnlockServerModeUserConfigured(false)
+            .setAllowConcurrentPlayback(false)
             .build()
 
     override suspend fun readFrom(input: InputStream): AppSettingsProto {

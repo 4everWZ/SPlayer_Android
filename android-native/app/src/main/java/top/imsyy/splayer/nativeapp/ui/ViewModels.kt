@@ -1551,6 +1551,7 @@ data class SettingsUiState(
     val showRomanized: Boolean = false,
     val autoPlay: Boolean = true,
     val showQueueCount: Boolean = true,
+    val allowConcurrentPlayback: Boolean = false,
     val lyricFontScale: Int = 100,
     val themeMode: ThemeMode = ThemeMode.DARK,
     val unlockServerMode: UnlockServerMode = UnlockServerMode.LOCAL,
@@ -1578,6 +1579,7 @@ class SettingsViewModel @Inject constructor(
                     showRomanized = settings.showRoma,
                     autoPlay = settings.autoPlay,
                     showQueueCount = settings.showQueueCount,
+                    allowConcurrentPlayback = settings.allowConcurrentPlayback,
                     lyricFontScale = settings.lyricFontScale.coerceIn(85, 135),
                     themeMode = ThemeMode.fromRaw(settings.themeMode),
                     unlockServerMode = configuredUnlockServerMode(settings),
@@ -1719,6 +1721,12 @@ class SettingsViewModel @Inject constructor(
     fun setShowQueueCount(enabled: Boolean) {
         viewModelScope.launch {
             appSettingsStore.setShowQueueCount(enabled)
+        }
+    }
+
+    fun setAllowConcurrentPlayback(enabled: Boolean) {
+        viewModelScope.launch {
+            appSettingsStore.setAllowConcurrentPlayback(enabled)
         }
     }
 

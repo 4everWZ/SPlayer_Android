@@ -537,6 +537,12 @@ class PlaybackCoordinatorSupportTest {
 
         assertEquals(listOf("netease", "gequbao", "bodian"), servers)
     }
+
+    @Test
+    fun `resolveAudioFocusHandling requests focus unless concurrent playback is allowed`() {
+        assertTrue(resolveAudioFocusHandling(allowConcurrentPlayback = false))
+        assertFalse(resolveAudioFocusHandling(allowConcurrentPlayback = true))
+    }
 }
 
 private fun sampleTrack(id: Long): TrackItem {

@@ -4,6 +4,8 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.SystemClock
+import androidx.media3.common.AudioAttributes
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
@@ -125,6 +127,10 @@ internal fun shouldTriggerStallRecovery(
     stallTimeoutMs: Long,
 ): Boolean {
     return isBuffering && noProgressDurationMs >= stallTimeoutMs
+}
+
+internal fun resolveAudioFocusHandling(allowConcurrentPlayback: Boolean): Boolean {
+    return !allowConcurrentPlayback
 }
 
 internal data class SystemMediaTransportAvailability(
@@ -416,7 +422,12 @@ class PlaybackCoordinator @Inject constructor(
     private var wordLevelLyricProgressActive = false
     private var originalQueueForMode: List<TrackItem>? = null
     private var activeQueueSource: PlaybackQueueSource = PlaybackQueueSource.None
+    private var handleAudioFocus: Boolean? = null
     private val stallTimeoutMs = 9_000L
+    private val musicAudioAttributes = AudioAttributes.Builder()
+        .setUsage(C.USAGE_MEDIA)
+        .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+        .build()
 
     init {
         player.addListener(
@@ -472,6 +483,13 @@ class PlaybackCoordinator @Inject constructor(
         appScope.launch {
             appSettingsStore.settings.collect { settings ->
                 _uiState.value = _uiState.value.copy(playMode = PlayMode.fromRaw(settings.playMode))
+                val nextHandleAudioFocus = resolveAudioFocusHandling(settings.allowConcurrentPlayback)
+                if (handleAudioFocus != nextHandleAudioFocus) {
+                    handleAudioFocus = nextHandleAudioFocus
+                    withPlayer {
+                        setAudioAttributes(musicAudioAttributes, nextHandleAudioFocus)
+                    }
+                }
             }
         }
 

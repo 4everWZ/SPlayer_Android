@@ -21,4 +21,5 @@ message AppSettingsProto {
   int32 unlock_server_mode = 15;
   bool api_root_user_configured = 16;
   bool unlock_server_mode_user_configured = 17;
+  bool allow_concurrent_playback = 18;
 }

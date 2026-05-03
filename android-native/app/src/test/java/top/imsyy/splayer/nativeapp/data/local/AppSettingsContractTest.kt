@@ -78,6 +78,11 @@ class AppSettingsContractTest {
     }
 
     @Test
+    fun `default settings do not allow concurrent playback with other apps`() {
+        assertEquals(false, AppSettingsSerializer.defaultValue.allowConcurrentPlayback)
+    }
+
+    @Test
     fun `configuredApiRoot ignores legacy value without user configured marker`() {
         val settings = AppSettingsProto.newBuilder()
             .setApiRoot("https://legacy.example.com/splayer")

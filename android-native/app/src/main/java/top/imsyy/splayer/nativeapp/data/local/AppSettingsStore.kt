@@ -102,6 +102,10 @@ class AppSettingsStore @Inject constructor(
         update { current -> current.toBuilder().setShowQueueCount(enabled).build() }
     }
 
+    suspend fun setAllowConcurrentPlayback(enabled: Boolean) {
+        update { current -> current.toBuilder().setAllowConcurrentPlayback(enabled).build() }
+    }
+
     suspend fun setLyricFontScale(scale: Int) {
         update { current ->
             current.toBuilder()

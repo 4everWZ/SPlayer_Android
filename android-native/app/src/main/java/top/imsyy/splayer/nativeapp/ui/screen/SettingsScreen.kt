@@ -3,6 +3,7 @@ package top.imsyy.splayer.nativeapp.ui.screen
 import android.graphics.BitmapFactory
 import android.util.Base64
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -32,8 +33,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.input.ImeAction
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -49,6 +52,7 @@ fun SettingsScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     var apiRootInput by rememberSaveable { mutableStateOf(state.apiRoot) }
+    val qrImageSize = resolveSettingsQrImageSizeDp(LocalConfiguration.current.screenWidthDp).dp
     LaunchedEffect(state.apiRoot) {
         apiRootInput = state.apiRoot
     }
@@ -70,7 +74,7 @@ fun SettingsScreen(
         item {
             SettingsSectionCard(
                 title = "账号",
-                description = "登录沿用外部 /splayer/* 二维码链路；本地原生能力只用于 unlock",
+                description = "登录沿用 API Root 下的 /netease/* 二维码链路；本地原生能力只用于 unlock",
             ) {
                 val qrBitmap = remember(state.qrImageUrl) {
                     extractQrBase64Payload(state.qrImageUrl)?.let { payload ->
@@ -115,18 +119,22 @@ fun SettingsScreen(
                     } else {
                         when {
                             qrBitmap != null -> {
-                                Image(
-                                    bitmap = qrBitmap,
-                                    contentDescription = "登录二维码",
-                                    modifier = Modifier.fillMaxWidth(),
-                                )
+                                Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                                    Image(
+                                        bitmap = qrBitmap,
+                                        contentDescription = "登录二维码",
+                                        modifier = Modifier.size(qrImageSize),
+                                    )
+                                }
                             }
                             !state.qrImageUrl.isNullOrBlank() -> {
-                                AsyncImage(
-                                    model = state.qrImageUrl,
-                                    contentDescription = "登录二维码",
-                                    modifier = Modifier.fillMaxWidth(),
-                                )
+                                Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                                    AsyncImage(
+                                        model = state.qrImageUrl,
+                                        contentDescription = "登录二维码",
+                                        modifier = Modifier.size(qrImageSize),
+                                    )
+                                }
                             }
                         }
                     }
@@ -149,6 +157,11 @@ fun SettingsScreen(
                     title = "小播放条显示队列数量",
                     checked = state.showQueueCount,
                     onCheckedChange = viewModel::setShowQueueCount,
+                )
+                SettingsSwitchRow(
+                    title = "允许与其他应用同时播放",
+                    checked = state.allowConcurrentPlayback,
+                    onCheckedChange = viewModel::setAllowConcurrentPlayback,
                 )
                 Button(onClick = viewModel::clearQueue, modifier = Modifier.fillMaxWidth()) {
                     Text("清空播放队列")
@@ -335,4 +348,9 @@ internal fun extractQrBase64Payload(value: String?): String? {
     val index = value.indexOf(marker)
     if (index < 0) return null
     return value.substring(index + marker.length).takeIf { it.isNotBlank() }
+}
+
+internal fun resolveSettingsQrImageSizeDp(screenWidthDp: Int): Int {
+    val approximateCardContentWidth = screenWidthDp - 64
+    return approximateCardContentWidth.coerceIn(196, 280)
 }

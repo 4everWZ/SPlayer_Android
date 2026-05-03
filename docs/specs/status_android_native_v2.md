@@ -35,6 +35,8 @@
 - 歌单详情已有当前歌曲高亮和“定位当前播放”按钮。
 - 播放模式切换会先预览 UI 状态，心动模式会拉取 `playmode/intelligence/list`。
 - 歌单播放启动时会读取同一歌单当前已缓存 tracks，并在播放源登记后立即同步一次播放队列，用于兜住“分页先完成、播放稍后登记来源”的竞态。
+- 设置页新增“允许与其他应用同时播放”，默认关闭；关闭时 Media3 请求音频焦点，开启后不抢占其他应用音频。
+- 设置页二维码改为居中放大显示，避免扫码图过小。
 
 ### Partially Implemented
 
@@ -63,7 +65,7 @@
 ## Validation Snapshot
 
 - 已知目标单测曾通过：`SettingsViewModelLoginTest`、`SPlayerRemoteRepositoryTest.checkQrState*`、`ViewModelSupportTest`、`PlaybackCoordinatorSupportTest`。
-- 本状态文档更新后尚未重新跑测试。
+- 本状态文档更新前已通过新增目标测试：`AppSettingsContractTest`、`PlaybackCoordinatorSupportTest`、`QrCodeSupportTest`、`SettingsViewModelLoginTest`。
 - ADB 已由用户打开，但本轮尚未安装覆盖。
 
 ## Recommended Next Steps
