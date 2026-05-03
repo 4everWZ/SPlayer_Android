@@ -15,6 +15,7 @@ import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
@@ -24,7 +25,25 @@ import top.imsyy.splayer.nativeapp.data.api.SPlayerApiService
 import top.imsyy.splayer.nativeapp.data.local.AppSettingsStore
 import top.imsyy.splayer.nativeapp.data.local.PlaylistDetailCacheDao
 import top.imsyy.splayer.nativeapp.data.local.SPlayerDatabase
+import top.imsyy.splayer.nativeapp.data.repository.NativeNeteaseApiClient
+import top.imsyy.splayer.nativeapp.data.repository.NativeUnblockApiClient
+import top.imsyy.splayer.nativeapp.data.repository.RemoteNeteaseApiClient
+import top.imsyy.splayer.nativeapp.data.repository.RemoteUnblockApiClient
 import top.imsyy.splayer.nativeapp.data.repository.SPlayerRemoteRepository
+import top.imsyy.splayer.nativeapp.data.repository.SwitchingNeteaseApiClient
+import top.imsyy.splayer.nativeapp.data.repository.SwitchingUnblockApiClient
+
+const val PLAYBACK_SNAPSHOT_CREATE_SQL = """
+CREATE TABLE IF NOT EXISTS `playback_snapshot` (
+    `id` INTEGER NOT NULL,
+    `currentTrackId` INTEGER NOT NULL,
+    `currentIndex` INTEGER NOT NULL,
+    `positionMs` INTEGER NOT NULL,
+    `durationMs` INTEGER NOT NULL,
+    `savedAtMs` INTEGER NOT NULL,
+    PRIMARY KEY(`id`)
+)
+"""
 
 @Qualifier
 annotation class ApplicationScope
@@ -53,6 +72,12 @@ object AppModule {
         }
     }
 
+    private val MIGRATION_2_3 = object : Migration(2, 3) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(PLAYBACK_SNAPSHOT_CREATE_SQL.trimIndent())
+        }
+    }
+
     @Provides
     @Singleton
     @ApplicationScope
@@ -62,12 +87,15 @@ object AppModule {
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): SPlayerDatabase {
         return Room.databaseBuilder(context, SPlayerDatabase::class.java, "splayer_native.db")
-            .addMigrations(MIGRATION_1_2)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
             .build()
     }
 
     @Provides
     fun providePlaybackQueueDao(database: SPlayerDatabase) = database.playbackQueueDao()
+
+    @Provides
+    fun providePlaybackSnapshotDao(database: SPlayerDatabase) = database.playbackSnapshotDao()
 
     @Provides
     fun provideRecentPlayDao(database: SPlayerDatabase) = database.recentPlayDao()
@@ -80,15 +108,20 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideOkHttpClient(appSettingsStore: AppSettingsStore): OkHttpClient {
+    fun provideOkHttpClient(
+        appSettingsStore: AppSettingsStore,
+        @ApplicationScope appScope: CoroutineScope,
+    ): OkHttpClient {
         val requestCookieInterceptor = Interceptor { chain ->
             val request = chain.request()
             val cookieHeader = appSettingsStore.buildCookieHeader()
             val newRequest = request.newBuilder().apply {
-                if (cookieHeader.isNotBlank()) {
+                if (request.header("Cookie").isNullOrBlank() && cookieHeader.isNotBlank()) {
                     header("Cookie", cookieHeader)
                 }
-                header("User-Agent", "SPlayer-Native/2.0")
+                if (request.header("User-Agent").isNullOrBlank()) {
+                    header("User-Agent", "SPlayer-Native/2.0")
+                }
             }.build()
             chain.proceed(newRequest)
         }
@@ -101,7 +134,7 @@ object AppModule {
                     val pair = cookie.substringBefore(";").split("=", limit = 2)
                     pair.first() to pair.getOrElse(1) { "" }
                 }
-                kotlinx.coroutines.runBlocking {
+                appScope.launch {
                     appSettingsStore.updateCookies(
                         musicU = parsed["MUSIC_U"],
                         csrf = parsed["__csrf"],
@@ -146,12 +179,34 @@ object AppModule {
         api: SPlayerApiService,
         appSettingsStore: AppSettingsStore,
         playlistDetailCacheDao: PlaylistDetailCacheDao,
+        nativeNeteaseApiClient: NativeNeteaseApiClient,
+        okHttpClient: OkHttpClient,
     ): SPlayerRemoteRepository {
+        val remoteNeteaseApiClient = RemoteNeteaseApiClient(
+            api = api,
+            apiRootProvider = { appSettingsStore.currentApiRoot() },
+            requireApiRoot = true,
+        )
+        val remoteUnblockApiClient = RemoteUnblockApiClient(
+            api = api,
+            apiRootProvider = { appSettingsStore.currentApiRoot() },
+            requireApiRoot = true,
+        )
         return SPlayerRemoteRepository(
             api = api,
             apiRootProvider = { appSettingsStore.currentApiRoot() },
             requireApiRoot = true,
             playlistDetailCacheDao = playlistDetailCacheDao,
+            neteaseApiClient = SwitchingNeteaseApiClient(
+                modeProvider = { appSettingsStore.currentUnlockServerMode() },
+                localClient = nativeNeteaseApiClient,
+                remoteClient = remoteNeteaseApiClient,
+            ),
+            unblockApiClient = SwitchingUnblockApiClient(
+                modeProvider = { appSettingsStore.currentUnlockServerMode() },
+                localClient = NativeUnblockApiClient(okHttpClient),
+                remoteClient = remoteUnblockApiClient,
+            ),
         )
     }
 

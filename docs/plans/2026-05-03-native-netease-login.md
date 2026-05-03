@@ -1,29 +1,39 @@
-# Android Native 登录计划废弃说明
+# Android Native 本地 API 登录与 Release Notes 实施记录
 
-> **For agentic workers:** 本文件是废弃记录，不再作为实现计划执行。后续实现以 `docs/specs/dev_android_api.md`、`docs/specs/dev_android_player.md`、`docs/specs/status_android_native_v2.md` 和 `docs/specs/matrix_android_native_v2.md` 为准。
+> **For agentic workers:** 本文件记录 2026-05-03 本地 API 登录与 release notes 修复的当前实施范围。后续实现以 `docs/specs/dev_android_api.md`、`docs/specs/dev_android_player.md`、`docs/specs/status_android_native_v2.md` 和 `docs/specs/matrix_android_native_v2.md` 为准。
 
-**废弃原因:** 2026-05-03 用户已明确纠正：“原生 Android”只指 unlock 服务；登录不要原生化，继续使用既有远程二维码登录链路。
+## 当前目标
 
-**当前结论:** Android Native 不实现网易云手机号登录、短信验证码登录、国家码列表或本地原生二维码登录客户端。设置页只保留远程二维码登录入口，调用已配置 `API_ROOT/netease/*`。
+- Android Native 首次安装默认使用本地 API 模式。
+- 本地 API 模式不要求填写 `apiRoot`，不启动 Node/Electron，不启动本地 HTTP server。
+- 二维码登录继续使用网易云二维码链路，但 LOCAL 由 `NativeNeteaseApiClient` 用 Kotlin/OkHttp 请求网易云接口，REMOTE 才请求用户填写的外部 `API_ROOT/netease/*`。
+- 推荐、发现、我的、歌单、搜索、歌词、评论、心动模式和官方音源等 Android 当前已用 `/netease/*` endpoint，在 LOCAL 模式优先走原生实现。
+- 发布 workflow 使用唯一 tag 追加 release，并按 Conventional Commit 分类生成中文 release notes。
 
----
+## 明确不做
 
-## 当前真实范围
+- 不实现手机号登录、短信验证码登录和国家码列表。
+- 不把 `.env.mobile`、用户局域网地址或私有 API Root 写进 APK。
+- 不在 Android 内启动桌面端 Node/Electron runtime。
+- 不把用户私有 API Root 当成本地 provider；LOCAL 只内置 desktop local 同款公开 provider 上游。
 
-- 登录：继续走远程 `API_ROOT/netease/login/qr/key`、`API_ROOT/netease/login/qr/create`、`API_ROOT/netease/login/qr/check`、`API_ROOT/netease/login/status`。
-- API Root：APK 不内置私有根路径；用户在设置页自行填写完整根路径，例如 `https://example.com/splayer`。
-- 原生能力：仅限低功耗本地 unlock，不启动桌面端 Node/Electron runtime。
-- Remote unlock：只有用户切到外部 unlock 且已配置 API Root 时，才请求 `API_ROOT/unblock/*`。
+## 当前实现
 
-## 已回滚内容
+- `SwitchingNeteaseApiClient` 按 `UnlockServerMode` 分发 LOCAL/REMOTE。
+- `NativeNeteaseApiClient` 覆盖 Android 当前已用的网易云 endpoint，并生成二维码 data URI。
+- `RemoteNeteaseApiClient` 只在 REMOTE 下使用用户配置的 API Root，空根路径时返回模式化提示。
+- `SPlayerRemoteRepository` 不再直接用 API Root 判断网易云登录是否可用，改为依赖 `NeteaseApiClient`。
+- Cookie 仍落到 `AppSettingsStore`，OkHttp 响应 Cookie 持久化改为应用 IO scope 异步写入，避免阻塞拦截器线程。
+- `NativeUnblockApiClient` 用 Kotlin/OkHttp 原生实现 desktop local 同款 `bodian / gequbao / netease / kuwo` provider。
+- LOCAL 与 REMOTE 的解锁候选顺序一致，REMOTE 走用户 API Root，LOCAL 不开 Node server。
+- `.github/workflows/android-native-debug.yml` 使用 `android-native-debug-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${GITHUB_SHA}` 类唯一 tag，release body 包含构建信息和中文分类更新内容。
 
-- 已删除误加的 native 登录生产实现和测试。
-- 已移除 ZXing 依赖。
-- `SettingsViewModel` 登录路径已改回 `SPlayerRemoteRepository`。
-- 设置页已移除手机号、验证码、国家码等入口。
+## 验证要求
 
-## 仍需跟进
-
-- 真机验证远程二维码登录成功后，设置页、首页和推荐页不再提示缺少 API Root。
-- 歌单播放开始后，分页加载的新歌曲必须动态补进当前播放列表，不能要求用户重新点一首歌。
-- 文档和实现矩阵必须继续删除“Android 原生登录”残留说法。
+- `./gradlew.bat :app:testDebugUnitTest :app:assembleDebug`
+- `corepack pnpm lint`
+- `corepack pnpm build`
+- `corepack pnpm format`
+- `git diff --check --ignore-space-at-eol`
+- APK 扫描不得出现用户私有 IP、`.env.mobile` 地址或个人 API Root；公开第三方 provider URL 属于预期内置依赖。
+- ADB 卸载安装后启动，检查 logcat 中无 AndroidRuntime crash。

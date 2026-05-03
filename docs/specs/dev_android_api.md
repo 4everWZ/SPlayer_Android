@@ -10,7 +10,8 @@
 ## 总原则
 
 - API 语义与 `SPlayer desktop` 对齐
-- Android 当前主线通过 `remote API` 落地这些语义
+- Android 默认走“本地 API”模式：不启动 Node/Electron，不启动本地 HTTP server，而是用 Kotlin + OkHttp 按需直连网易云接口
+- 用户显式切到“远程 API”模式时，才通过设置页 `apiRoot` 请求外部 `${apiRoot}/netease/*`、`${apiRoot}/unblock/*`
 - 原生端不额外引入一套与桌面不同的接口解释、错误语义或播放判定规则
 
 ## 子接口
@@ -38,26 +39,29 @@
 
 ## 服务前提
 
-- Android 不启动桌面端 Node/Electron 本地 unlock 服务
-- 默认 `unlockServerMode=LOCAL`，由 Android 原生网络请求按需解析网易云直连解锁候选
-- 用户选择外部服务器时切到 `unlockServerMode=EXTERNAL`，请求当前设置页 `apiRoot` 下的 `/unblock/*`
-- `apiRoot` 未配置时，登录、推荐、发现、歌单、搜索、歌词、评论等远程 API 不主动请求
-- `apiRoot` 已配置时，登录继续走外部 `API_ROOT/netease/*`
-- Android 不提供本地原生登录 provider，不启动 Node、本地 HTTP server 或桌面 runtime
-- 本地 unlock 仍可按需请求原生直连解锁候选
+- Android 不启动桌面端 Node/Electron 本地 unlock/API 服务
+- 默认 `unlockServerMode=LOCAL`，产品语义为“本地 API 模式”
+- 本地 API 模式下，二维码登录、登录状态、推荐、发现、我的、歌单、搜索、歌词、评论、心动模式和官方音源请求都走 `NativeNeteaseApiClient`
+- 远程 API 模式下，请求当前设置页 `apiRoot` 下的 `/netease/*` 和 `/unblock/*`
+- 远程 API 模式且 `apiRoot` 为空时，提示“远程 API 模式需要先填写 API 根路径，或切回本地 API 模式登录/使用”
+- 本地 API 模式下，解锁候选也与远程 API 模式保持同序，并按 desktop 默认启用优先级尝试：`bodian -> gequbao -> netease -> kuwo`
+- 本地解锁候选由 `NativeUnblockApiClient` 原生实现 desktop local provider，不启动 Node 服务；公开第三方 provider URL 会进入 APK，但不得写入用户私有 API Root、局域网 IP 或个人反代域名
 - 设置项“允许与其他应用同时播放”默认关闭；关闭时播放器请求音频焦点，开启时不处理音频焦点以允许混播
 - 客户端不得再叠加会员可用性判断、广告解锁判断或 VIP 导流逻辑
 - 即便远程服务具备解锁能力，客户端仍要保留官方源与多解锁源故障转移链
 
 ## 登录链路
 
-- 设置页登录沿用远程二维码链路，必须先配置 API Root
-- Android Native 不实现手机号、验证码、国家码、本地二维码生成或本地网易云登录客户端
+- 设置页登录沿用二维码链路
+- 本地 API 模式下，首次安装无需配置 API Root 即可生成二维码、轮询扫码状态并获取登录状态
+- 远程 API 模式下，必须先配置 API Root 才能调用外部二维码接口
+- Android Native 不实现手机号、验证码或国家码登录
 - 设置页初始化不自动请求登录端点；只有点击二维码登录时才请求
 - 设置页二维码以更大固定尺寸居中展示，不能随卡片宽度被压成过小预览
 - 二维码轮询由设置页可见状态持有，取消登录、二维码过期、登录成功或 ViewModel 清理时必须停止
-- `apiRoot` 已配置时，登录走外部 `API_ROOT/netease/*`
-- 推荐、发现、歌单、搜索、歌词和评论仍属于远程 API 能力，未配置 `apiRoot` 时不主动请求
+- LOCAL 模式登录走 `NativeNeteaseApiClient`
+- REMOTE 模式登录走外部 `API_ROOT/netease/*`
+- 未登录但 API 模式可用时，页面提示“请先登录网易云账号”，不误导用户填写 API Root
 
 ## Cookie 合同
 
@@ -163,16 +167,17 @@
 
 `unlockServerMode=LOCAL`：
 
-1. `native-netease`，Android 原生按需请求 `https://music-api.gdstudio.xyz/api.php`
+1. `/netease/song/url/v1` 由 `NativeNeteaseApiClient` 原生请求网易云官方接口
+2. `NativeUnblockApiClient` 按 `bodian -> gequbao -> netease -> kuwo` 原生请求 desktop local 同款 provider
 
 `unlockServerMode=EXTERNAL`：
 
-1. `unblock/netease`
-2. `unblock/kuwo`
-3. `unblock/gequbao`
-4. `unblock/bodian`
+1. `unblock/bodian`
+2. `unblock/gequbao`
+3. `unblock/netease`
+4. `unblock/kuwo`
 
-`unblock/netease` 失败或返回空 URL 时，按 desktop 对齐回退到 Android 原生网易云直连解锁候选。
+无论 LOCAL 还是 EXTERNAL，任一候选失败或返回空 URL 时都继续尝试下一个候选。LOCAL/EXTERNAL 的候选顺序和返回语义必须一致，差异只在 provider 执行位置。
 
 所有音源 URL 在进入播放器前统一正规化。
 
@@ -188,6 +193,6 @@
 
 ## 当前边界
 
-- 首阶段不内置 Node/Electron 本地 API runtime；本地 unlock 只保留 Android 原生按需网络解析
+- 首阶段不内置 Node/Electron 本地 API runtime；本地 API 与本地 unlock 都保留 Android 原生按需网络解析
 - 播客相关仓储仍保留在仓库中，但不属于当前听歌主线
-- `qqmusic` 端点尚未在 UI 首批功能中消费，但接口根路径已保留
+- `qqmusic` 当前仅作为歌词增强 fallback，不属于播放 unlock 候选；LOCAL 模式下该 fallback 仍可静默降级为空，不阻断网易云歌词、TTML 和播放解锁主链路

@@ -87,8 +87,8 @@
 ## 13. Android V1.5 补充取舍
 
 - **Original Spec/Idea:** `embedded` 模式在 APK 内完整覆盖当前 App 使用到的全部 `netease / unblock / qqmusic` 调用面，不再依赖远程 `/splayer/*`。
-- **Actual Implementation:** 本轮先完成 `ApiRuntime`、`ApiEndpointRegistry`、`build:mobile:remote`、`build:mobile:embedded` 与 CI 工作流接入；`embedded` 模式下未实现的 provider 会自动回退到远程 `/splayer/*`。
-- **Reasoning:** 先把模式切换、构建入口、运行时挂点和 CI 产物打通，能在不破坏现有可用性的前提下继续补齐 provider；如果在这一轮硬上全量内置接口，验证面会显著超出当前 Android 收口任务的风险预算。
+- **Actual Implementation:** Native V2 已把默认 LOCAL 模式改成原生 Kotlin/OkHttp 路径，网易云 API 与播放解锁候选不再依赖远程 `/splayer/*`；播放解锁按 desktop 默认优先级实现 `bodian / gequbao / netease / kuwo`，REMOTE 仍走同序外部 `/unblock/*`。
+- **Reasoning:** 保留“不在 Android 内启动 Node/Electron runtime”的功耗边界，同时把播放主链路从早期 embedded/remote 过渡方案收口到原生按需请求。
 
 - **Original Spec/Idea:** 播放器稳定性修复应彻底避免“中途卡住但系统媒体进度继续走”的问题，并兼顾能效。
 - **Actual Implementation:** 现有 Web/JS 音频链路上新增了 `loading / buffering / recovering` 状态、卡流看门狗、`waiting` 恢复链和 Android 媒体时间轴冻结逻辑；缓冲和恢复阶段会暂停非必要背景动画与歌词刷新。

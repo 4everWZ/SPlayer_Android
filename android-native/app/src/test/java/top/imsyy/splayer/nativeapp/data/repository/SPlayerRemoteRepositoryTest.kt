@@ -84,7 +84,7 @@ class SPlayerRemoteRepositoryTest {
         apiRoot = configuredRoot
         val user = repository.fetchLoginState()
 
-        assertEquals("请先在设置中填写 API 根路径", missingRoot?.message)
+        assertEquals(REMOTE_API_ROOT_REQUIRED_MESSAGE, missingRoot?.message)
         requireNotNull(user)
         assertEquals(43L, user.userId)
         assertEquals(
@@ -619,16 +619,10 @@ class SPlayerRemoteRepositoryTest {
     }
 
     @Test
-    fun `resolveSongSource uses native direct netease unlock without remote unblock request`() = runBlocking {
+    fun `resolveSongSource uses local official netease api without remote unblock request`() = runBlocking {
         val api = FakeApiService(
             responses = mapOf(
-                "netease/song/url/v1" to """{"data":[{"url":null}]}""",
-                "https://music-api.gdstudio.xyz/api.php" to """
-                    {
-                      "url": "http://m801.music.126.net/direct.mp3",
-                      "br": 320000
-                    }
-                """.trimIndent(),
+                "netease/song/url/v1" to """{"data":[{"url":"http://m801.music.126.net/direct.mp3","level":"exhigh"}]}""",
             ),
         )
         val repository = SPlayerRemoteRepository(api = api)
@@ -643,34 +637,36 @@ class SPlayerRemoteRepositoryTest {
                 durationMs = 180_000L,
             ),
             tryOfficial = true,
-            enabledUnlockServers = listOf("native-netease"),
+            enabledUnlockServers = emptyList(),
         )
 
         assertEquals("https://m801.music.126.net/direct.mp3", source.url)
-        assertEquals("native-netease", source.source)
-        assertTrue(source.unlocked)
+        assertEquals("official", source.source)
+        assertFalse(source.unlocked)
         assertFalse(api.calls.any { it.url.startsWith("unblock/") })
-        val directCall = api.calls.first { it.url == "https://music-api.gdstudio.xyz/api.php" }
-        assertEquals("url", directCall.params["types"])
-        assertEquals("909", directCall.params["id"])
     }
 
     @Test
-    fun `resolveSongSource in blank api root local mode skips remote official and uses native direct unlock`() = runBlocking {
-        val api = FakeApiService(
+    fun `resolveSongSource in blank api root local mode uses local unblock provider after official fails`() = runBlocking {
+        val remoteApi = FakeApiService(
+            responses = emptyMap(),
+        )
+        val neteaseClient = FakeRepositoryNeteaseApiClient(
             responses = mapOf(
-                "https://music-api.gdstudio.xyz/api.php" to """
-                    {
-                      "url": "http://m801.music.126.net/local.mp3",
-                      "br": 320000
-                    }
-                """.trimIndent(),
+                "song/url/v1" to """{"data":[{"url":null}]}""",
+            ),
+        )
+        val unblockClient = FakeRepositoryUnblockApiClient(
+            responses = mapOf(
+                "netease" to """{"code":200,"url":"http://m801.music.126.net/local.mp3","br":320000}""",
             ),
         )
         val repository = SPlayerRemoteRepository(
-            api = api,
+            api = remoteApi,
             apiRootProvider = { "" },
             requireApiRoot = true,
+            neteaseApiClient = neteaseClient,
+            unblockApiClient = unblockClient,
         )
 
         val source = repository.resolveSongSource(
@@ -683,16 +679,19 @@ class SPlayerRemoteRepositoryTest {
                 durationMs = 180_000L,
             ),
             tryOfficial = true,
-            enabledUnlockServers = listOf("native-netease"),
+            enabledUnlockServers = listOf("netease", "kuwo", "gequbao", "bodian"),
         )
 
         assertEquals("https://m801.music.126.net/local.mp3", source.url)
-        assertEquals("native-netease", source.source)
-        assertEquals(listOf("https://music-api.gdstudio.xyz/api.php"), api.calls.map { it.url })
+        assertEquals("netease", source.source)
+        assertTrue(source.unlocked)
+        assertEquals(emptyList<String>(), remoteApi.calls.map { it.url })
+        assertEquals(listOf("song/url/v1", "song/url/v1", "song/url/v1"), neteaseClient.calls.map { it.path })
+        assertEquals(listOf("netease"), unblockClient.calls.map { it.server })
     }
 
     @Test
-    fun `resolveSongSource skips official trial url and continues with unlock source`() = runBlocking {
+    fun `resolveSongSource skips official trial url and uses remote unblock source`() = runBlocking {
         val api = FakeApiService(
             responses = mapOf(
                 "netease/song/url/v1" to """
@@ -706,7 +705,7 @@ class SPlayerRemoteRepositoryTest {
                       ]
                     }
                 """.trimIndent(),
-                "https://music-api.gdstudio.xyz/api.php" to """
+                "unblock/netease" to """
                     {
                       "url": "http://m801.music.126.net/full.mp3",
                       "br": 320000
@@ -726,21 +725,21 @@ class SPlayerRemoteRepositoryTest {
                 durationMs = 180_000L,
             ),
             tryOfficial = true,
-            enabledUnlockServers = listOf("native-netease"),
+            enabledUnlockServers = listOf("netease"),
         )
 
         assertEquals("https://m801.music.126.net/full.mp3", source.url)
-        assertEquals("native-netease", source.source)
+        assertEquals("netease", source.source)
         assertTrue(source.unlocked)
-        assertTrue(api.calls.any { it.url == "https://music-api.gdstudio.xyz/api.php" })
+        assertTrue(api.calls.any { it.url == "unblock/netease" })
     }
 
     @Test
-    fun `resolveSongSource falls back to direct netease when external netease returns no url`() = runBlocking {
+    fun `resolveSongSource continues to next remote unblock source when external netease returns no url`() = runBlocking {
         val api = FakeApiService(
             responses = mapOf(
                 "unblock/netease" to """{"url": ""}""",
-                "https://music-api.gdstudio.xyz/api.php" to """
+                "unblock/kuwo" to """
                     {
                       "url": "http://m801.music.126.net/external-fallback.mp3",
                       "br": 320000
@@ -760,14 +759,14 @@ class SPlayerRemoteRepositoryTest {
                 durationMs = 180_000L,
             ),
             tryOfficial = false,
-            enabledUnlockServers = listOf("netease"),
+            enabledUnlockServers = listOf("netease", "kuwo"),
         )
 
         assertEquals("https://m801.music.126.net/external-fallback.mp3", source.url)
-        assertEquals("native-netease", source.source)
+        assertEquals("kuwo", source.source)
         assertTrue(source.unlocked)
         assertTrue(api.calls.any { it.url == "unblock/netease" })
-        assertTrue(api.calls.any { it.url == "https://music-api.gdstudio.xyz/api.php" })
+        assertTrue(api.calls.any { it.url == "unblock/kuwo" })
     }
 
     @Test
@@ -2111,6 +2110,40 @@ private class FakeApiService(
 
 private data class ApiCall(
     val url: String,
+    val params: Map<String, String>,
+)
+
+private class FakeRepositoryNeteaseApiClient(
+    private val responses: Map<String, String>,
+) : NeteaseApiClient {
+    val calls = mutableListOf<NeteaseApiCall>()
+
+    override suspend fun get(path: String, params: Map<String, String>): String {
+        calls += NeteaseApiCall(path = path, params = params)
+        return responses[path] ?: error("missing netease response for $path")
+    }
+
+    override suspend fun canRequestOfficialApi(): Boolean = true
+}
+
+private data class NeteaseApiCall(
+    val path: String,
+    val params: Map<String, String>,
+)
+
+private class FakeRepositoryUnblockApiClient(
+    private val responses: Map<String, String>,
+) : UnblockApiClient {
+    val calls = mutableListOf<UnblockApiCall>()
+
+    override suspend fun get(server: String, params: Map<String, String>): String {
+        calls += UnblockApiCall(server = server, params = params)
+        return responses[server] ?: error("missing unblock response for $server")
+    }
+}
+
+private data class UnblockApiCall(
+    val server: String,
     val params: Map<String, String>,
 )
 

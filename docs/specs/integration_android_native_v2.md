@@ -69,8 +69,8 @@
 - 通过标准：
   - 默认模式为原生本地
   - 原生本地模式不启动桌面端 Node/Electron 本地 unlock 服务
-  - 原生本地模式只把 `native-netease` 加入解锁候选
-  - 外部服务器模式只请求 `API_ROOT/unblock/*` 候选
+  - 原生本地模式不启动 Node/Electron server，使用 Kotlin/OkHttp 实现 desktop local 同款 `bodian / gequbao / netease / kuwo` provider
+  - 外部服务器模式请求 `API_ROOT/unblock/*` 候选
   - 播放失败源记忆仍能过滤当前模式下的候选
 - 当前状态：代码和单测已覆盖默认值、候选切换和网易云直连请求，待真机播放样本回归
 

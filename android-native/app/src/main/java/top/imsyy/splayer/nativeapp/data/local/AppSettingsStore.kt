@@ -161,7 +161,6 @@ internal fun configuredApiRoot(settings: AppSettingsProto): String {
 
 internal fun configuredUnlockServerMode(settings: AppSettingsProto): UnlockServerMode {
     if (!settings.unlockServerModeUserConfigured) return UnlockServerMode.LOCAL
-    if (configuredApiRoot(settings).isBlank()) return UnlockServerMode.LOCAL
     return UnlockServerMode.fromRaw(settings.unlockServerMode)
 }
 

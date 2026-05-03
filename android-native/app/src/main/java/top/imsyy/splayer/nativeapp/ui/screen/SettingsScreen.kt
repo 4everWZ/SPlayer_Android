@@ -74,7 +74,7 @@ fun SettingsScreen(
         item {
             SettingsSectionCard(
                 title = "账号",
-                description = "登录沿用 API Root 下的 /netease/* 二维码链路；本地原生能力只用于 unlock",
+                description = "二维码登录使用网易云账号状态；本地 API 模式无需 API 根路径",
             ) {
                 val qrBitmap = remember(state.qrImageUrl) {
                     extractQrBase64Payload(state.qrImageUrl)?.let { payload ->
@@ -198,7 +198,7 @@ fun SettingsScreen(
         item {
             SettingsSectionCard(
                 title = "网络",
-                description = "默认使用原生本地解锁；选择外部服务器时只走 API 根路径提供的解锁服务",
+                description = "默认使用本地 API；切到远程 API 时才需要 API 根路径",
             ) {
                 Text("模式：${state.appMode}")
                 OutlinedTextField(
@@ -212,7 +212,7 @@ fun SettingsScreen(
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                 )
                 Text(
-                    "外部服务器请填写完整根路径。端口按你的服务实际监听端口填写，应用不会自动补端口。",
+                    "远程 API 请填写完整根路径。端口按你的服务实际监听端口填写，应用不会自动补端口。",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 state.apiRootError?.let { message ->
@@ -228,7 +228,7 @@ fun SettingsScreen(
                     Text("保存 API 根路径")
                 }
                 SettingsSwitchRow(
-                    title = "使用外部 unlock 服务器",
+                    title = "使用远程 API",
                     checked = state.unlockServerMode == UnlockServerMode.EXTERNAL,
                     onCheckedChange = { enabled ->
                         viewModel.setUnlockServerMode(
@@ -238,9 +238,9 @@ fun SettingsScreen(
                 )
                 Text(
                     if (state.unlockServerMode == UnlockServerMode.EXTERNAL) {
-                        "当前播放源解析会先请求 API 根路径下的 /unblock/*；netease 无结果时回退到原生直连解锁。"
+                        "当前为远程 API 模式，会使用 API 根路径提供的服务。"
                     } else {
-                        "当前播放源解析使用原生本地解锁，不加载桌面本地 unlock 服务。登录和推荐、发现、歌单、搜索仍需要 API 根路径。"
+                        "当前为本地 API 模式，首次安装无需填写 API 根路径即可登录/使用。"
                     },
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -295,7 +295,7 @@ fun SettingsScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Text(
-                    "Unlock：${if (state.unlockServerMode == UnlockServerMode.EXTERNAL) "外部服务器" else "原生本地"}",
+                    "API 模式：${if (state.unlockServerMode == UnlockServerMode.EXTERNAL) "远程 API" else "本地 API"}",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Text(

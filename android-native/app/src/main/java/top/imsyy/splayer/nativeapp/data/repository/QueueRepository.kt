@@ -8,15 +8,26 @@ import top.imsyy.splayer.nativeapp.data.local.FailedSourceDao
 import top.imsyy.splayer.nativeapp.data.local.FailedSourceEntity
 import top.imsyy.splayer.nativeapp.data.local.PlaybackQueueDao
 import top.imsyy.splayer.nativeapp.data.local.PlaybackQueueEntity
+import top.imsyy.splayer.nativeapp.data.local.PlaybackSnapshotDao
+import top.imsyy.splayer.nativeapp.data.local.PlaybackSnapshotEntity
 import top.imsyy.splayer.nativeapp.data.local.RecentPlayDao
 import top.imsyy.splayer.nativeapp.data.local.RecentPlayEntity
 import top.imsyy.splayer.nativeapp.model.TrackItem
+
+data class PlaybackSnapshot(
+    val currentTrackId: Long,
+    val currentIndex: Int,
+    val positionMs: Long,
+    val durationMs: Long,
+    val savedAtMs: Long,
+)
 
 @Singleton
 class QueueRepository @Inject constructor(
     private val playbackQueueDao: PlaybackQueueDao,
     private val recentPlayDao: RecentPlayDao,
     private val failedSourceDao: FailedSourceDao,
+    private val playbackSnapshotDao: PlaybackSnapshotDao,
 ) {
     fun observeQueue(): Flow<List<TrackItem>> = playbackQueueDao.observeQueue().map { items ->
         items.map { entity ->
@@ -40,6 +51,18 @@ class QueueRepository @Inject constructor(
                 album = entity.album,
                 coverUrl = entity.coverUrl,
                 durationMs = entity.durationMs,
+            )
+        }
+    }
+
+    fun observePlaybackSnapshot(): Flow<PlaybackSnapshot?> = playbackSnapshotDao.observeSnapshot().map { entity ->
+        entity?.let {
+            PlaybackSnapshot(
+                currentTrackId = it.currentTrackId,
+                currentIndex = it.currentIndex,
+                positionMs = it.positionMs,
+                durationMs = it.durationMs,
+                savedAtMs = it.savedAtMs,
             )
         }
     }
@@ -78,6 +101,7 @@ class QueueRepository @Inject constructor(
 
     suspend fun clearQueue() {
         playbackQueueDao.clearQueue()
+        playbackSnapshotDao.clearSnapshot()
     }
 
     suspend fun clearRecent() {
@@ -96,5 +120,21 @@ class QueueRepository @Inject constructor(
 
     suspend fun clearAllFailedSources() {
         failedSourceDao.clearAll()
+    }
+
+    suspend fun upsertPlaybackSnapshot(snapshot: PlaybackSnapshot) {
+        playbackSnapshotDao.upsertSnapshot(
+            PlaybackSnapshotEntity(
+                currentTrackId = snapshot.currentTrackId,
+                currentIndex = snapshot.currentIndex,
+                positionMs = snapshot.positionMs,
+                durationMs = snapshot.durationMs,
+                savedAtMs = snapshot.savedAtMs,
+            ),
+        )
+    }
+
+    suspend fun clearPlaybackSnapshot() {
+        playbackSnapshotDao.clearSnapshot()
     }
 }

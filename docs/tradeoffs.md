@@ -64,4 +64,4 @@
 
 - 主题：Android unlock 默认使用原生按需解析
 - 原因：移动端不应为了默认播放链启动桌面端 Node/Electron 本地 unlock 服务，避免额外常驻进程和功耗
-- 影响：默认 `unlockServerMode=LOCAL` 只启用 `native-netease`；选择外部服务器后才请求 `API_ROOT/unblock/*` 的 `netease / kuwo / gequbao / bodian` 候选；失败音源记忆仍按当前模式过滤
+- 影响：默认 `unlockServerMode=LOCAL` 通过 `NativeUnblockApiClient` 原生实现 desktop local 同款公开 provider，候选顺序与 REMOTE 的 `API_ROOT/unblock/*` 一致；APK 允许包含公开 provider URL，但仍不得包含用户私有 API Root、局域网 IP 或个人反代域名；失败音源记忆仍按当前模式过滤

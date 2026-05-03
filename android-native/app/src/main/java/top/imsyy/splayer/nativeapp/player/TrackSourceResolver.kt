@@ -6,21 +6,19 @@ import kotlin.math.max
 import top.imsyy.splayer.nativeapp.data.local.AppSettingsStore
 import top.imsyy.splayer.nativeapp.data.repository.QueueRepository
 import top.imsyy.splayer.nativeapp.data.repository.SPlayerRemoteRepository
+import top.imsyy.splayer.nativeapp.data.repository.ANDROID_UNBLOCK_SERVERS
 import top.imsyy.splayer.nativeapp.model.TrackItem
 import top.imsyy.splayer.nativeapp.model.TrackSource
 import top.imsyy.splayer.nativeapp.model.UnlockServerMode
-
-internal const val LOCAL_NETEASE_UNLOCK_SOURCE = "native-netease"
-
-private val orderedRemoteUnlockServers = listOf("netease", "kuwo", "gequbao", "bodian")
 
 internal fun resolveEnabledUnlockServers(
     mode: UnlockServerMode,
     failedSources: Set<String>,
 ): List<String> {
     val orderedServers = when (mode) {
-        UnlockServerMode.LOCAL -> listOf(LOCAL_NETEASE_UNLOCK_SOURCE)
-        UnlockServerMode.EXTERNAL -> orderedRemoteUnlockServers
+        UnlockServerMode.LOCAL,
+        UnlockServerMode.EXTERNAL,
+        -> ANDROID_UNBLOCK_SERVERS
     }
     return orderedServers.filterNot { failedSources.contains(it) }
 }

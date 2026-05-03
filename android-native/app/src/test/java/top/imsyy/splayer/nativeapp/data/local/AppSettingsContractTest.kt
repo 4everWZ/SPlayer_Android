@@ -128,7 +128,7 @@ class AppSettingsContractTest {
     }
 
     @Test
-    fun `configuredUnlockServerMode keeps legacy external value local without configured api root`() {
+    fun `configuredUnlockServerMode keeps legacy external value local without user configuration`() {
         val settings = AppSettingsProto.newBuilder()
             .setApiRoot("https://legacy.example.com/splayer")
             .setApiRootUserConfigured(false)
@@ -151,10 +151,8 @@ class AppSettingsContractTest {
     }
 
     @Test
-    fun `configuredUnlockServerMode keeps external when api root was explicitly configured`() {
+    fun `configuredUnlockServerMode keeps external when mode was explicitly configured`() {
         val settings = AppSettingsProto.newBuilder()
-            .setApiRoot("https://example.com/splayer")
-            .setApiRootUserConfigured(true)
             .setUnlockServerMode(UnlockServerMode.EXTERNAL.rawValue)
             .setUnlockServerModeUserConfigured(true)
             .build()

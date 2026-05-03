@@ -56,7 +56,7 @@
 ## 数据流
 
 1. Compose 页面触发 ViewModel 行为
-2. ViewModel 调仓库拉取 `/splayer/*` 数据
+2. ViewModel 调仓库拉取数据；默认 LOCAL 模式走原生 Kotlin/OkHttp，本地不启动 Node/Electron server
 3. 播放请求进入 `PlaybackCoordinator`
 4. `TrackSourceResolver` 按桌面语义选择官方源或解锁源
 5. ExoPlayer 实际播放
@@ -64,6 +64,6 @@
 
 ## 当前约束
 
-- 只实现 `remote` 模式
+- 默认实现 LOCAL 本地 API / 本地 unlock；REMOTE 仅在用户显式配置外部 API Root 后启用
 - 评论、歌词、队列、设置已进入原生 UI
 - 歌单/专辑/歌手详情页尚未进入首批交付范围

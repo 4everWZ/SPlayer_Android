@@ -63,6 +63,8 @@ Android 版本仍然是 **Capacitor 轻壳 + 现有 Vue 前端 + Web/JS 播放�
 
 ## 4. 当前未完成边界
 
+> 历史说明：本节描述 Android V1.5 Capacitor 轻壳阶段。Android Native V2 已转为默认 LOCAL 原生 API / 原生 unlock，当前实现状态以 `docs/specs/dev_android_api.md`、`docs/specs/dev_android_player.md` 和 `docs/specs/status_android_native_v2.md` 为准。
+
 ### 4.1 完全本地 APK
 
 当前 `embedded` 模式还不是“完全本地 APK”。

@@ -14,10 +14,9 @@ class NativeUnlockResourceContractTest {
 
         assertFalse(sourceRoot.contains("ProcessBuilder"))
         assertFalse(sourceRoot.contains("node"))
-        assertFalse(sourceRoot.contains("25884"))
         assertFalse(sourceRoot.contains("server/standalone"))
         assertFalse(sourceRoot.contains("VITE_SERVER_PORT"))
-        assertFalse(sourceRoot.contains("NeteaseLoginRepository"))
-        assertFalse(sourceRoot.contains("NativeNeteaseLoginClient"))
+        assertFalse(sourceRoot.contains("127.0.0.1:"))
+        assertFalse(sourceRoot.contains("runBlocking"))
     }
 }

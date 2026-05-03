@@ -1744,23 +1744,18 @@ class SettingsViewModel @Inject constructor(
 
     fun setUnlockServerMode(mode: UnlockServerMode) {
         viewModelScope.launch {
-            if (mode == UnlockServerMode.EXTERNAL && _uiState.value.apiRoot.isBlank()) {
-                appSettingsStore.setUnlockServerMode(UnlockServerMode.LOCAL)
-                _uiState.value = _uiState.value.copy(
-                    unlockServerMode = UnlockServerMode.LOCAL,
-                    apiRootError = "使用外部 unlock 前请先保存 API 根路径",
-                    apiRootSavedMessage = null,
-                )
-                return@launch
-            }
             appSettingsStore.setUnlockServerMode(mode)
             _uiState.value = _uiState.value.copy(
                 unlockServerMode = mode,
-                apiRootError = null,
-                apiRootSavedMessage = if (mode == UnlockServerMode.LOCAL) {
-                    "已切换为原生本地 unlock"
+                apiRootError = if (mode == UnlockServerMode.EXTERNAL && _uiState.value.apiRoot.isBlank()) {
+                    REMOTE_API_EMPTY_ROOT_MESSAGE
                 } else {
-                    "已切换为外部 unlock 服务器"
+                    null
+                },
+                apiRootSavedMessage = if (mode == UnlockServerMode.LOCAL) {
+                    "已切换为本地 API 模式"
+                } else {
+                    "已切换为远程 API 模式"
                 },
             )
         }
@@ -1783,7 +1778,7 @@ class SettingsViewModel @Inject constructor(
                     },
                     apiRootError = null,
                     apiRootSavedMessage = if (normalizedApiRoot.isBlank()) {
-                        "已清空 API 根路径，并切换为原生本地 unlock"
+                        "已清空 API 根路径，并切换为本地 API 模式"
                     } else {
                         "API 根路径已保存"
                     },
@@ -1853,5 +1848,20 @@ internal fun sanitizeLoadErrorMessage(
     if (looksLikeParserNoise || looksLikeDuplicatedPayload) {
         return "$fallback，请稍后重试"
     }
+    if (message.contains("远程 API") && message.contains("API 根路径")) {
+        return REMOTE_API_EMPTY_ROOT_MESSAGE
+    }
+    if (message.contains("API 根路径")) {
+        if (message.contains("登录")) {
+            return LOGIN_REQUIRED_MESSAGE
+        }
+        return "$fallback，请稍后重试"
+    }
+    if (message.contains("未登录") || message.contains("需要登录") || message.contains("请先登录")) {
+        return LOGIN_REQUIRED_MESSAGE
+    }
     return message
 }
+
+internal const val LOGIN_REQUIRED_MESSAGE = "请先登录网易云账号"
+internal const val REMOTE_API_EMPTY_ROOT_MESSAGE = "远程 API 模式需要先填写 API 根路径，或切回本地 API 模式登录/使用"

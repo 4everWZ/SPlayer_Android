@@ -32,16 +32,21 @@
 
 ### 解锁源
 
-`unlockServerMode=LOCAL` 为默认模式，按需走 Android 原生网络解析：
+`unlockServerMode=LOCAL` 为默认模式，官方源失败后按 desktop local provider 顺序走 Android 原生解锁实现：
 
-1. `native-netease`
+1. `native unblock/bodian`
+2. `native unblock/gequbao`
+3. `native unblock/netease`
+4. `native unblock/kuwo`
 
-`unlockServerMode=EXTERNAL` 为外部服务器模式，按顺序尝试：
+`unlockServerMode=EXTERNAL` 为外部服务器模式，按相同顺序请求远程 API：
 
-1. `unblock/netease`
-2. `unblock/kuwo`
-3. `unblock/gequbao`
-4. `unblock/bodian`
+1. `unblock/bodian`
+2. `unblock/gequbao`
+3. `unblock/netease`
+4. `unblock/kuwo`
+
+LOCAL 与 EXTERNAL 的候选顺序、失败跳转和 URL 归一化语义保持一致。LOCAL 不启动 Node/Electron server，只在需要解析音源时由 Kotlin/OkHttp 请求公开 provider 上游。
 
 ### 失败记忆
 
@@ -81,6 +86,10 @@
 ## 进度策略
 
 - 只有真实进度推进时才刷新 UI 时间轴
+- 冷启动恢复上次播放会话时，只恢复 UI 状态和进度，不自动解析音源、不自动启动播放服务
+- 用户点击播放后，如果播放器还没有 `MediaItem` 但 UI 已有恢复歌曲，才解析音源、`prepare()` 并跳到保存进度继续播放
+- 保存进度距离歌曲结尾小于约 `5s` 或超过时长时，下一次恢复进度归零
+- 播放快照写入 Room `playback_snapshot` 单行表，播放中最多约每 `5s` 写一次，暂停、seek、切歌和进入后台会强制保存
 - 缓冲态必须冻结 `positionMs`
 - 切源态必须冻结系统媒体条
 - 恢复完成后再继续推进
@@ -141,8 +150,10 @@
 
 - 前台播放服务崩溃：已修复
 - 官方源与解锁源分离：已实现
-- Unlock 模式切换：已实现，默认原生本地，外部模式只走远程 `/unblock/*`
+- Unlock 模式切换：已实现，LOCAL 原生 provider 与 EXTERNAL `/unblock/*` 候选顺序一致
 - 同时播放设置：已实现，默认请求音频焦点，用户开启后允许混播
+- 播放会话恢复：已实现基础流，冷启动会从 Room 队列和 `playback_snapshot` 恢复小播放条、唱片页进度和播放模式，默认暂停态，点击播放后才解析音源
+- 小播放条进度：已实现细进度条，使用低频秒级进度，避免每个播放器 tick 都重组底部 chrome
 - 失败音源记忆：已实现
 - 动态重试上限：已实现
 - 模拟器坏解码器过滤：已实现

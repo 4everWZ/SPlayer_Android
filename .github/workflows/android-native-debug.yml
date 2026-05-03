@@ -15,6 +15,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - name: Setup Java
         uses: actions/setup-java@v5
@@ -56,23 +58,79 @@ jobs:
           APK_VERSION: ${{ steps.apk-version.outputs.version }}
         shell: bash
         run: |
-          tag_name="android-native-debug-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}-${GITHUB_SHA::7}"
+          tag_name="android-native-debug-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${GITHUB_SHA::7}"
           release_title="Android Native Debug APK ${APK_VERSION}"
           git tag "$tag_name" "$GITHUB_SHA"
           git push origin "$tag_name"
-          updates="$(git log --no-merges --pretty=format:'- %s (%h)' -n 12 "$GITHUB_SHA")"
+
+          if [ -n "${{ github.event.before }}" ] && [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
+            git log --no-merges --pretty=format:'%s (%h)' "${{ github.event.before }}..${GITHUB_SHA}" > commit_subjects.txt
+          else
+            git log --no-merges --pretty=format:'%s (%h)' -n 12 "$GITHUB_SHA" > commit_subjects.txt
+          fi
+
+          if [ ! -s commit_subjects.txt ]; then
+            echo "chore: 本次构建未检测到新的提交 (${GITHUB_SHA::7})" > commit_subjects.txt
+          fi
+
+          rm -f changelog_*.md changelog_content.md
+          while IFS= read -r line; do
+            type="维护"
+            body="- ${line}"
+            if [[ "$line" =~ ^([a-zA-Z]+)(\([^)]*\))?!?:[[:space:]]*(.*)$ ]]; then
+              raw_type="${BASH_REMATCH[1]}"
+              body="- ${BASH_REMATCH[3]}"
+              case "$raw_type" in
+                feat) type="新增" ;;
+                fix) type="修复" ;;
+                docs) type="文档" ;;
+                style) type="样式" ;;
+                refactor) type="重构" ;;
+                perf) type="性能" ;;
+                test) type="测试" ;;
+                build) type="构建" ;;
+                ci) type="CI" ;;
+                revert) type="回退" ;;
+                chore) type="维护" ;;
+              esac
+            fi
+            printf '%s\n' "$body" >> "changelog_${type}.md"
+          done < commit_subjects.txt
+
+          append_section() {
+            local file="changelog_${1}.md"
+            if [ -s "$file" ]; then
+              printf '### %s\n' "$1" >> changelog_content.md
+              cat "$file" >> changelog_content.md
+              printf '\n' >> changelog_content.md
+            fi
+          }
+
+          append_section "新增"
+          append_section "修复"
+          append_section "文档"
+          append_section "重构"
+          append_section "性能"
+          append_section "测试"
+          append_section "构建"
+          append_section "CI"
+          append_section "样式"
+          append_section "回退"
+          append_section "维护"
+
           cat > release_notes.md <<EOF
           Android Native debug APK 自动构建
 
           ## 更新内容
 
-          ${updates}
+          $(cat changelog_content.md)
 
           ## 构建信息
 
           - Version: ${APK_VERSION}
           - Commit: ${GITHUB_SHA}
           - Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+          - APK: ${APK_NAME}
           EOF
           gh release create "$tag_name" \
             --title "$release_title" \

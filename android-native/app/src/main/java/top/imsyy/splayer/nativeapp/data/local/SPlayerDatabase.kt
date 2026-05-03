@@ -21,6 +21,16 @@ data class PlaybackQueueEntity(
     val durationMs: Long,
 )
 
+@Entity(tableName = "playback_snapshot")
+data class PlaybackSnapshotEntity(
+    @PrimaryKey val id: Int = 1,
+    val currentTrackId: Long,
+    val currentIndex: Int,
+    val positionMs: Long,
+    val durationMs: Long,
+    val savedAtMs: Long,
+)
+
 @Entity(tableName = "recent_play")
 data class RecentPlayEntity(
     @PrimaryKey val songId: Long,
@@ -65,6 +75,18 @@ interface PlaybackQueueDao {
 }
 
 @Dao
+interface PlaybackSnapshotDao {
+    @Query("SELECT * FROM playback_snapshot WHERE id = 1")
+    fun observeSnapshot(): Flow<PlaybackSnapshotEntity?>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertSnapshot(snapshot: PlaybackSnapshotEntity)
+
+    @Query("DELETE FROM playback_snapshot")
+    suspend fun clearSnapshot()
+}
+
+@Dao
 interface RecentPlayDao {
     @Query("SELECT * FROM recent_play ORDER BY playedAt DESC LIMIT :limit")
     fun observeRecent(limit: Int = 30): Flow<List<RecentPlayEntity>>
@@ -106,15 +128,17 @@ interface PlaylistDetailCacheDao {
 @Database(
     entities = [
         PlaybackQueueEntity::class,
+        PlaybackSnapshotEntity::class,
         RecentPlayEntity::class,
         FailedSourceEntity::class,
         PlaylistDetailCacheEntity::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = false,
 )
 abstract class SPlayerDatabase : RoomDatabase() {
     abstract fun playbackQueueDao(): PlaybackQueueDao
+    abstract fun playbackSnapshotDao(): PlaybackSnapshotDao
     abstract fun recentPlayDao(): RecentPlayDao
     abstract fun failedSourceDao(): FailedSourceDao
     abstract fun playlistDetailCacheDao(): PlaylistDetailCacheDao

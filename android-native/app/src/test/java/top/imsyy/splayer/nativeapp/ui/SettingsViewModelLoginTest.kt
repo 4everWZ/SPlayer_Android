@@ -49,6 +49,18 @@ class SettingsViewModelLoginTest {
         assertTrue(viewModels.contains("fun setAllowConcurrentPlayback"))
     }
 
+    @Test
+    fun `settings api mode copy uses local and remote api labels`() {
+        val settingsScreen = File("src/main/java/top/imsyy/splayer/nativeapp/ui/screen/SettingsScreen.kt").readText()
+        val viewModels = readViewModelsSource()
+
+        assertTrue(settingsScreen.contains("本地 API"))
+        assertTrue(settingsScreen.contains("远程 API"))
+        assertTrue(viewModels.contains("远程 API 模式需要先填写 API 根路径，或切回本地 API 模式登录/使用"))
+        assertFalse(settingsScreen.contains("外部 unlock"))
+        assertFalse(settingsScreen.contains("原生本地 unlock"))
+    }
+
     private fun readSettingsViewModelSource(): String {
         return readViewModelsSource().substringAfter("class SettingsViewModel")
     }

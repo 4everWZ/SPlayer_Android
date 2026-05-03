@@ -5,6 +5,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
+import top.imsyy.splayer.nativeapp.data.repository.PlaybackSnapshot
 import top.imsyy.splayer.nativeapp.model.PlayMode
 import top.imsyy.splayer.nativeapp.model.TrackItem
 import top.imsyy.splayer.nativeapp.model.UnlockServerMode
@@ -35,11 +36,10 @@ class PlaybackCoordinatorSupportTest {
     }
 
     @Test
-    fun `shouldRunProgressLoop only keeps ticker alive while player detail is active`() {
+    fun `shouldRunProgressLoop keeps foreground mini player ticker alive at low cadence`() {
         assertTrue(
             shouldRunProgressLoop(
                 hasActiveSubscribers = true,
-                playerScreenActive = true,
                 isPlaying = true,
                 isBuffering = false,
             ),
@@ -47,7 +47,6 @@ class PlaybackCoordinatorSupportTest {
         assertFalse(
             shouldRunProgressLoop(
                 hasActiveSubscribers = false,
-                playerScreenActive = true,
                 isPlaying = true,
                 isBuffering = false,
             ),
@@ -55,25 +54,15 @@ class PlaybackCoordinatorSupportTest {
         assertFalse(
             shouldRunProgressLoop(
                 hasActiveSubscribers = true,
-                playerScreenActive = false,
-                isPlaying = true,
-                isBuffering = false,
-            ),
-        )
-        assertFalse(
-            shouldRunProgressLoop(
-                hasActiveSubscribers = true,
-                playerScreenActive = true,
-                isPlaying = false,
-                isBuffering = false,
-            ),
-        )
-        assertFalse(
-            shouldRunProgressLoop(
-                hasActiveSubscribers = true,
-                playerScreenActive = true,
                 isPlaying = true,
                 isBuffering = true,
+            ),
+        )
+        assertFalse(
+            shouldRunProgressLoop(
+                hasActiveSubscribers = true,
+                isPlaying = false,
+                isBuffering = false,
             ),
         )
     }
@@ -486,7 +475,88 @@ class PlaybackCoordinatorSupportTest {
     }
 
     @Test
-    fun `toMiniPlayerChromeState ignores progress ticks and keeps chrome payload stable`() {
+    fun `resolveRestoredPlaybackState restores paused current track from queue snapshot`() {
+        val queue = listOf(sampleTrack(1), sampleTrack(2), sampleTrack(3))
+
+        val restored = resolveRestoredPlaybackState(
+            previousState = PlaybackUiState(isPlaying = true, isBuffering = true),
+            queue = queue,
+            snapshot = PlaybackSnapshot(
+                currentTrackId = 2L,
+                currentIndex = 1,
+                positionMs = 64_000L,
+                durationMs = 180_000L,
+                savedAtMs = 123L,
+            ),
+            playMode = PlayMode.SHUFFLE,
+        )
+
+        assertEquals(2L, restored.currentTrack?.id)
+        assertEquals(1, restored.currentIndex)
+        assertEquals(64_000L, restored.positionMs)
+        assertEquals(180_000L, restored.durationMs)
+        assertEquals(PlayMode.SHUFFLE, restored.playMode)
+        assertFalse(restored.isPlaying)
+        assertFalse(restored.isBuffering)
+        assertNull(restored.currentSource)
+    }
+
+    @Test
+    fun `resolveRestoredPlaybackState ignores snapshot when current track is absent from queue`() {
+        val previous = PlaybackUiState(currentTrack = sampleTrack(9), currentIndex = 0)
+
+        val restored = resolveRestoredPlaybackState(
+            previousState = previous,
+            queue = listOf(sampleTrack(1), sampleTrack(2)),
+            snapshot = PlaybackSnapshot(
+                currentTrackId = 9L,
+                currentIndex = 0,
+                positionMs = 30_000L,
+                durationMs = 180_000L,
+                savedAtMs = 123L,
+            ),
+            playMode = PlayMode.LIST_LOOP,
+        )
+
+        assertNull(restored.currentTrack)
+        assertEquals(-1, restored.currentIndex)
+        assertEquals(listOf(1L, 2L), restored.queue.map { it.id })
+        assertEquals(PlayMode.LIST_LOOP, restored.playMode)
+    }
+
+    @Test
+    fun `resolveRestoredPlaybackState clears stale ui when queue is empty`() {
+        val previous = PlaybackUiState(
+            queue = listOf(sampleTrack(9)),
+            currentTrack = sampleTrack(9),
+            currentIndex = 0,
+            positionMs = 50_000L,
+            durationMs = 180_000L,
+        )
+
+        val restored = resolveRestoredPlaybackState(
+            previousState = previous,
+            queue = emptyList(),
+            snapshot = null,
+            playMode = PlayMode.SEQUENCE,
+        )
+
+        assertEquals(emptyList<TrackItem>(), restored.queue)
+        assertNull(restored.currentTrack)
+        assertEquals(-1, restored.currentIndex)
+        assertEquals(0L, restored.positionMs)
+        assertEquals(0L, restored.durationMs)
+    }
+
+    @Test
+    fun `sanitizeRestoredPositionMs resets progress near song ending`() {
+        assertEquals(0L, sanitizeRestoredPositionMs(positionMs = 176_000L, durationMs = 180_000L))
+        assertEquals(0L, sanitizeRestoredPositionMs(positionMs = 180_000L, durationMs = 180_000L))
+        assertEquals(120_000L, sanitizeRestoredPositionMs(positionMs = 120_000L, durationMs = 180_000L))
+    }
+
+    @Test
+    fun `toMiniPlayerChromeState exposes coarse progress for mini player bar`() {
         val track = TrackItem(
             id = 501L,
             name = "测试歌曲",
@@ -517,19 +587,98 @@ class PlaybackCoordinatorSupportTest {
             ),
         )
 
-        assertEquals(first, second)
+        assertEquals(12_000L, first.positionMs)
+        assertEquals(18_000L, second.positionMs)
+        assertEquals(245_000L, first.durationMs)
         assertEquals(1, first.queueCount)
         assertEquals("测试歌曲", first.currentTrack?.name)
     }
 
     @Test
-    fun `resolveEnabledUnlockServers uses native direct candidate in local mode`() {
+    fun `resolveMiniPlayerProgressFraction handles empty duration safely`() {
+        assertEquals(0f, resolveMiniPlayerProgressFraction(positionMs = 30_000L, durationMs = 0L), 0.001f)
+        assertEquals(0.5f, resolveMiniPlayerProgressFraction(positionMs = 90_000L, durationMs = 180_000L), 0.001f)
+        assertEquals(1f, resolveMiniPlayerProgressFraction(positionMs = 220_000L, durationMs = 180_000L), 0.001f)
+    }
+
+    @Test
+    fun `resolvePlaybackToggleAction upgrades restored ui state before normal player play`() {
+        val restoredState = PlaybackUiState(
+            currentTrack = sampleTrack(7),
+            currentSource = null,
+            isPlaying = false,
+        )
+
+        assertEquals(
+            PlaybackToggleAction.ResumeRestored,
+            resolvePlaybackToggleAction(
+                state = restoredState,
+                playerMediaItemCount = 0,
+                playerIsPlaying = false,
+            ),
+        )
+        assertEquals(
+            PlaybackToggleAction.PlayPrepared,
+            resolvePlaybackToggleAction(
+                state = restoredState,
+                playerMediaItemCount = 1,
+                playerIsPlaying = false,
+            ),
+        )
+        assertEquals(
+            PlaybackToggleAction.Pause,
+            resolvePlaybackToggleAction(
+                state = restoredState.copy(isPlaying = true),
+                playerMediaItemCount = 1,
+                playerIsPlaying = true,
+            ),
+        )
+    }
+
+    @Test
+    fun `shouldApplyRestoredPlaybackSnapshot depends on captured player state only`() {
+        val restoredState = PlaybackUiState(
+            currentTrack = null,
+            currentSource = null,
+            isPlaying = false,
+        )
+
+        assertTrue(
+            shouldApplyRestoredPlaybackSnapshot(
+                restoreSnapshotApplied = false,
+                playerMediaItemCount = 0,
+                state = restoredState,
+            ),
+        )
+        assertFalse(
+            shouldApplyRestoredPlaybackSnapshot(
+                restoreSnapshotApplied = false,
+                playerMediaItemCount = 1,
+                state = restoredState,
+            ),
+        )
+        assertFalse(
+            shouldApplyRestoredPlaybackSnapshot(
+                restoreSnapshotApplied = true,
+                playerMediaItemCount = 0,
+                state = restoredState,
+            ),
+        )
+    }
+
+    @Test
+    fun `resolveEnabledUnlockServers keeps local and remote provider order consistent`() {
         val servers = resolveEnabledUnlockServers(
             mode = UnlockServerMode.LOCAL,
             failedSources = emptySet(),
         )
+        val remoteServers = resolveEnabledUnlockServers(
+            mode = UnlockServerMode.EXTERNAL,
+            failedSources = emptySet(),
+        )
 
-        assertEquals(listOf(LOCAL_NETEASE_UNLOCK_SOURCE), servers)
+        assertEquals(listOf("bodian", "gequbao", "netease", "kuwo"), servers)
+        assertEquals(remoteServers, servers)
     }
 
     @Test
@@ -539,7 +688,7 @@ class PlaybackCoordinatorSupportTest {
             failedSources = setOf("kuwo"),
         )
 
-        assertEquals(listOf("netease", "gequbao", "bodian"), servers)
+        assertEquals(listOf("bodian", "gequbao", "netease"), servers)
     }
 
     @Test

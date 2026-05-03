@@ -7,8 +7,10 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.supervisorScope
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -84,10 +86,18 @@ class SPlayerRemoteRepository(
     private val apiRootProvider: suspend () -> String = { "" },
     private val requireApiRoot: Boolean = false,
     private val playlistDetailCacheDao: PlaylistDetailCacheDao? = null,
+    private val neteaseApiClient: NeteaseApiClient = RemoteNeteaseApiClient(
+        api = api,
+        apiRootProvider = apiRootProvider,
+        requireApiRoot = requireApiRoot,
+    ),
+    private val unblockApiClient: UnblockApiClient = RemoteUnblockApiClient(
+        api = api,
+        apiRootProvider = apiRootProvider,
+        requireApiRoot = requireApiRoot,
+    ),
 ) {
     private companion object {
-        const val DIRECT_NETEASE_UNLOCK_BASE_URL = "https://music-api.gdstudio.xyz/api.php"
-        const val NATIVE_NETEASE_UNLOCK_SOURCE = "native-netease"
         const val PLAYLIST_PREVIEW_SIZE = 20
         const val PLAYLIST_INITIAL_PAGE_SIZE = 80
         const val PLAYLIST_PAGE_SIZE = 500
@@ -749,20 +759,10 @@ class SPlayerRemoteRepository(
 
         for (server in enabledUnlockServers) {
             val (result, sourceName) = when (server) {
-                NATIVE_NETEASE_UNLOCK_SOURCE -> getDirectNeteaseUnlock(track.id) to NATIVE_NETEASE_UNLOCK_SOURCE
-                "netease" -> {
-                    val external = runCatching {
-                        getUnblock(
-                            server = server,
-                            params = mapOf("id" to track.id.toString(), "noCookie" to "true"),
-                        )
-                    }.getOrNull()
-                    if (normalizeUrl(external?.string("url").orEmpty()).isNotBlank()) {
-                        requireNotNull(external) to server
-                    } else {
-                        getDirectNeteaseUnlock(track.id) to NATIVE_NETEASE_UNLOCK_SOURCE
-                    }
-                }
+                "netease" -> getUnblock(
+                    server = server,
+                    params = mapOf("id" to track.id.toString(), "noCookie" to "true"),
+                ) to server
                 else -> {
                     getUnblock(
                         server = server,
@@ -776,7 +776,7 @@ class SPlayerRemoteRepository(
                 }
             }
             val url = normalizeUrl(result.string("url"))
-            if (url.isNotBlank()) {
+            if (url.isNotBlank() && !result.isTrialPreviewUrl()) {
                 return TrackSource(
                     url = url,
                     quality = result.string("br"),
@@ -789,20 +789,8 @@ class SPlayerRemoteRepository(
         error("AUDIO_SOURCE_EMPTY")
     }
 
-    private suspend fun getDirectNeteaseUnlock(trackId: Long): JsonObject {
-        val body = getRaw(
-            DIRECT_NETEASE_UNLOCK_BASE_URL,
-            mapOf(
-                "types" to "url",
-                "id" to trackId.toString(),
-                "noCookie" to "true",
-            ),
-        )
-        return parseJsonObjectBody(body)
-    }
-
     private suspend fun getNetease(path: String, params: Map<String, String> = emptyMap()): JsonObject {
-        val body = getRaw("netease/$path", params)
+        val body = neteaseApiClient.get(path, params)
         return parseJsonObjectBody(body)
     }
 
@@ -819,7 +807,7 @@ class SPlayerRemoteRepository(
     }
 
     private suspend fun getUnblock(server: String, params: Map<String, String>): JsonObject {
-        val body = getRaw("unblock/$server", params)
+        val body = unblockApiClient.get(server, params)
         return parseJsonObjectBody(body)
     }
 
@@ -834,7 +822,10 @@ class SPlayerRemoteRepository(
     }
 
     private suspend fun getRaw(path: String, params: Map<String, String> = emptyMap()): String {
-        return api.get(resolveApiUrl(path), params).string()
+        val url = resolveApiUrl(path)
+        return withContext(Dispatchers.IO) {
+            api.get(url, params).string()
+        }
     }
 
     private suspend fun resolveApiUrl(path: String): String {
@@ -845,12 +836,12 @@ class SPlayerRemoteRepository(
         val apiRoot = apiRootProvider().trim().trimEnd('/')
         if (apiRoot.isBlank() && !requireApiRoot) return trimmedPath
         check(apiRoot.isNotBlank()) {
-            "请先在设置中填写 API 根路径"
+            REMOTE_API_ROOT_REQUIRED_MESSAGE
         }
         return "$apiRoot/${trimmedPath.trimStart('/')}"
     }
 
-    private suspend fun canRequestConfiguredApi(): Boolean = !requireApiRoot || apiRootProvider().isNotBlank()
+    private suspend fun canRequestConfiguredApi(): Boolean = neteaseApiClient.canRequestOfficialApi()
 
     private fun parseJsonObjectBody(rawBody: String): JsonObject {
         return json.parseToJsonElement(extractFirstJsonEnvelope(rawBody)).jsonObject
@@ -986,8 +977,8 @@ class SPlayerRemoteRepository(
 
     private suspend fun parseTtmlLyric(songId: Long): List<LyricLineUi> {
         val body = runCatching {
-            getRaw(
-                "netease/lyric/ttml",
+            neteaseApiClient.get(
+                "lyric/ttml",
                 mapOf("id" to songId.toString(), "timestamp" to now()),
             )
         }.getOrNull().orEmpty()

@@ -1,8 +1,11 @@
 package top.imsyy.splayer.nativeapp.player
 
+import android.app.Activity
+import android.app.Application
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Bundle
 import android.os.SystemClock
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
@@ -21,6 +24,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -28,6 +32,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import top.imsyy.splayer.nativeapp.data.local.AppSettingsStore
+import top.imsyy.splayer.nativeapp.data.repository.PlaybackSnapshot
 import top.imsyy.splayer.nativeapp.data.repository.QueueRepository
 import top.imsyy.splayer.nativeapp.di.ApplicationScope
 import top.imsyy.splayer.nativeapp.model.PlayMode
@@ -56,7 +61,12 @@ data class MiniPlayerChromeState(
     val currentTrack: TrackItem? = null,
     val isPlaying: Boolean = false,
     val queueCount: Int = 0,
+    val positionMs: Long = 0L,
+    val durationMs: Long = 0L,
 )
+
+private const val RESTORE_END_RESET_THRESHOLD_MS = 5_000L
+private const val PLAYBACK_SNAPSHOT_SAVE_INTERVAL_MS = 5_000L
 
 internal fun seedPendingPlaybackState(
     previousState: PlaybackUiState,
@@ -85,11 +95,10 @@ internal fun shouldDispatchProgressUpdate(
 
 internal fun shouldRunProgressLoop(
     hasActiveSubscribers: Boolean,
-    playerScreenActive: Boolean,
     isPlaying: Boolean,
     isBuffering: Boolean,
 ): Boolean {
-    return hasActiveSubscribers && playerScreenActive && isPlaying && !isBuffering
+    return hasActiveSubscribers && isPlaying && !isBuffering
 }
 
 internal fun resolveProgressLoopIntervalMs(
@@ -110,6 +119,115 @@ internal fun toMiniPlayerChromeState(state: PlaybackUiState): MiniPlayerChromeSt
         currentTrack = state.currentTrack,
         isPlaying = state.isPlaying,
         queueCount = state.queue.size,
+        positionMs = state.positionMs.floorToSecondMs(),
+        durationMs = state.durationMs,
+    )
+}
+
+internal fun resolveMiniPlayerProgressFraction(
+    positionMs: Long,
+    durationMs: Long,
+): Float {
+    if (durationMs <= 0L) return 0f
+    return (positionMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
+}
+
+internal enum class PlaybackToggleAction {
+    Pause,
+    ResumeRestored,
+    PlayPrepared,
+}
+
+internal fun resolvePlaybackToggleAction(
+    state: PlaybackUiState,
+    playerMediaItemCount: Int,
+    playerIsPlaying: Boolean,
+): PlaybackToggleAction {
+    if (playerIsPlaying) return PlaybackToggleAction.Pause
+    return if (
+        playerMediaItemCount == 0 &&
+        state.currentTrack != null &&
+        state.currentSource == null
+    ) {
+        PlaybackToggleAction.ResumeRestored
+    } else {
+        PlaybackToggleAction.PlayPrepared
+    }
+}
+
+internal fun shouldApplyRestoredPlaybackSnapshot(
+    restoreSnapshotApplied: Boolean,
+    playerMediaItemCount: Int,
+    state: PlaybackUiState,
+): Boolean {
+    return !restoreSnapshotApplied &&
+        playerMediaItemCount == 0 &&
+        !state.isPlaying &&
+        state.currentSource == null
+}
+
+internal fun sanitizeRestoredPositionMs(
+    positionMs: Long,
+    durationMs: Long,
+): Long {
+    val boundedPosition = positionMs.coerceAtLeast(0L)
+    if (durationMs <= 0L) return boundedPosition
+    return if (boundedPosition >= durationMs - RESTORE_END_RESET_THRESHOLD_MS) {
+        0L
+    } else {
+        boundedPosition.coerceAtMost(durationMs)
+    }
+}
+
+internal fun resolveRestoredPlaybackState(
+    previousState: PlaybackUiState,
+    queue: List<TrackItem>,
+    snapshot: PlaybackSnapshot?,
+    playMode: PlayMode,
+): PlaybackUiState {
+    if (snapshot == null || snapshot.currentTrackId <= 0L) {
+        return previousState.copy(
+            queue = queue,
+            currentTrack = null,
+            currentIndex = -1,
+            isPlaying = false,
+            isBuffering = false,
+            positionMs = 0L,
+            durationMs = 0L,
+            playMode = playMode,
+            currentSource = null,
+            errorMessage = null,
+        )
+    }
+    val currentTrackId = snapshot.currentTrackId
+    val resolvedIndex = queue.indexOfFirst { it.id == currentTrackId }
+    if (resolvedIndex < 0) {
+        return previousState.copy(
+            queue = queue,
+            currentTrack = null,
+            currentIndex = -1,
+            isPlaying = false,
+            isBuffering = false,
+            positionMs = 0L,
+            durationMs = 0L,
+            playMode = playMode,
+            currentSource = null,
+            errorMessage = null,
+        )
+    }
+    val track = queue[resolvedIndex]
+    val durationMs = snapshot.durationMs.takeIf { it > 0L } ?: track.durationMs
+    return previousState.copy(
+        queue = queue,
+        currentTrack = track,
+        currentIndex = resolvedIndex,
+        isPlaying = false,
+        isBuffering = false,
+        positionMs = sanitizeRestoredPositionMs(snapshot.positionMs, durationMs),
+        durationMs = durationMs,
+        playMode = playMode,
+        currentSource = null,
+        errorMessage = null,
     )
 }
 
@@ -423,6 +541,8 @@ class PlaybackCoordinator @Inject constructor(
     private var originalQueueForMode: List<TrackItem>? = null
     private var activeQueueSource: PlaybackQueueSource = PlaybackQueueSource.None
     private var handleAudioFocus: Boolean? = null
+    private var restoreSnapshotApplied = false
+    private var lastSavedSnapshotElapsed = 0L
     private val stallTimeoutMs = 9_000L
     private val musicAudioAttributes = AudioAttributes.Builder()
         .setUsage(C.USAGE_MEDIA)
@@ -442,6 +562,7 @@ class PlaybackCoordinator @Inject constructor(
                     } else {
                         stopProgressUpdates()
                     }
+                    persistPlaybackSnapshot(force = !isPlaying)
                 }
 
                 override fun onPlaybackStateChanged(playbackState: Int) {
@@ -480,9 +601,12 @@ class PlaybackCoordinator @Inject constructor(
             },
         )
 
+        registerSnapshotPersistenceCallbacks(context)
+
         appScope.launch {
             appSettingsStore.settings.collect { settings ->
-                _uiState.value = _uiState.value.copy(playMode = PlayMode.fromRaw(settings.playMode))
+                val nextPlayMode = PlayMode.fromRaw(settings.playMode)
+                _uiState.value = _uiState.value.copy(playMode = nextPlayMode)
                 val nextHandleAudioFocus = resolveAudioFocusHandling(settings.allowConcurrentPlayback)
                 if (handleAudioFocus != nextHandleAudioFocus) {
                     handleAudioFocus = nextHandleAudioFocus
@@ -494,8 +618,46 @@ class PlaybackCoordinator @Inject constructor(
         }
 
         appScope.launch {
-            queueRepository.observeQueue().collect { queue ->
-                _uiState.value = _uiState.value.copy(queue = queue)
+            combine(
+                queueRepository.observeQueue(),
+                queueRepository.observePlaybackSnapshot(),
+                appSettingsStore.settings,
+            ) { queue, snapshot, settings ->
+                Triple(queue, snapshot, PlayMode.fromRaw(settings.playMode))
+            }.collect { (queue, snapshot, playMode) ->
+                val currentState = _uiState.value
+                val playerMediaItemCount = withPlayer { mediaItemCount }
+                val shouldApplyRestore = shouldApplyRestoredPlaybackSnapshot(
+                    restoreSnapshotApplied = restoreSnapshotApplied,
+                    playerMediaItemCount = playerMediaItemCount,
+                    state = currentState,
+                )
+                if (shouldApplyRestore) {
+                    _uiState.value = resolveRestoredPlaybackState(
+                        previousState = currentState,
+                        queue = queue,
+                        snapshot = snapshot,
+                        playMode = playMode,
+                    )
+                    restoreSnapshotApplied = true
+                } else {
+                    val latestState = _uiState.value
+                    val currentTrackId = latestState.currentTrack?.id
+                    val nextIndex = queue.indexOfFirst { it.id == currentTrackId }
+                    _uiState.value = if (queue.isEmpty()) {
+                        resolveRestoredPlaybackState(
+                            previousState = latestState,
+                            queue = emptyList(),
+                            snapshot = null,
+                            playMode = playMode,
+                        )
+                    } else {
+                        latestState.copy(
+                            queue = queue,
+                            currentIndex = nextIndex.takeIf { it >= 0 } ?: latestState.currentIndex,
+                        )
+                    }
+                }
             }
         }
 
@@ -503,7 +665,6 @@ class PlaybackCoordinator @Inject constructor(
             _uiState.subscriptionCount.collect { count ->
                 val shouldRun = shouldRunProgressLoop(
                     hasActiveSubscribers = count > 0,
-                    playerScreenActive = playerScreenProgressActive,
                     isPlaying = player.isPlaying,
                     isBuffering = player.playbackState == Player.STATE_BUFFERING,
                 )
@@ -549,7 +710,6 @@ class PlaybackCoordinator @Inject constructor(
         appScope.launch(Dispatchers.Main.immediate) {
             if (shouldRunProgressLoop(
                     hasActiveSubscribers = _uiState.subscriptionCount.value > 0,
-                    playerScreenActive = playerScreenProgressActive,
                     isPlaying = player.isPlaying,
                     isBuffering = player.playbackState == Player.STATE_BUFFERING,
                 )
@@ -661,20 +821,33 @@ class PlaybackCoordinator @Inject constructor(
 
     fun togglePlayback() {
         appScope.launch(Dispatchers.Main.immediate) {
-            if (player.isPlaying) {
-                player.pause()
-            } else {
-                player.play()
+            when (
+                resolvePlaybackToggleAction(
+                    state = _uiState.value,
+                    playerMediaItemCount = player.mediaItemCount,
+                    playerIsPlaying = player.isPlaying,
+                )
+            ) {
+                PlaybackToggleAction.Pause -> player.pause()
+                PlaybackToggleAction.ResumeRestored -> resumeRestoredPlayback()
+                PlaybackToggleAction.PlayPrepared -> player.play()
             }
         }
     }
 
     fun seekTo(positionMs: Long) {
         appScope.launch(Dispatchers.Main.immediate) {
-            player.seekTo(positionMs)
+            if (player.mediaItemCount > 0) {
+                player.seekTo(positionMs)
+            }
             lastStablePositionMs = positionMs
             lastPositionUpdateElapsed = SystemClock.elapsedRealtime()
-            syncProgressSnapshot(force = true)
+            if (player.mediaItemCount > 0) {
+                syncProgressSnapshot(force = true)
+            } else {
+                _uiState.value = _uiState.value.copy(positionMs = positionMs.coerceAtLeast(0L))
+                persistPlaybackSnapshot(force = true)
+            }
         }
     }
 
@@ -735,6 +908,7 @@ class PlaybackCoordinator @Inject constructor(
             errorMessage = null,
         )
         appSettingsStore.setPlayMode(targetMode)
+        persistPlaybackSnapshot(force = true)
         return true
     }
 
@@ -864,6 +1038,7 @@ class PlaybackCoordinator @Inject constructor(
             positionMs = 0L,
             errorMessage = null,
         )
+        persistPlaybackSnapshot(force = true)
     }
 
     private fun startProgressUpdates() {
@@ -871,7 +1046,6 @@ class PlaybackCoordinator @Inject constructor(
             progressJob?.isActive == true ||
             !shouldRunProgressLoop(
                 hasActiveSubscribers = _uiState.subscriptionCount.value > 0,
-                playerScreenActive = playerScreenProgressActive,
                 isPlaying = player.isPlaying,
                 isBuffering = player.playbackState == Player.STATE_BUFFERING,
             )
@@ -890,7 +1064,6 @@ class PlaybackCoordinator @Inject constructor(
                 if (
                     !shouldRunProgressLoop(
                         hasActiveSubscribers = _uiState.subscriptionCount.value > 0,
-                        playerScreenActive = playerScreenProgressActive,
                         isPlaying = player.isPlaying,
                         isBuffering = player.playbackState == Player.STATE_BUFFERING,
                     )
@@ -952,6 +1125,79 @@ class PlaybackCoordinator @Inject constructor(
     private fun stopStallWatchdog() {
         stallJob?.cancel()
         stallJob = null
+    }
+
+    private suspend fun resumeRestoredPlayback() {
+        val state = _uiState.value
+        val track = state.currentTrack ?: return
+        val resumePosition = sanitizeRestoredPositionMs(state.positionMs, state.durationMs)
+        ensureServiceRunning()
+        retryCount = 0
+        _uiState.value = state.copy(
+            isBuffering = true,
+            errorMessage = null,
+        )
+        trackSourceResolver.clearFailures(track)
+        val source = trackSourceResolver.resolve(track)
+        playResolvedTrack(
+            track = track,
+            source = source,
+            queueIndex = state.currentIndex.coerceAtLeast(0),
+            startPlayback = true,
+        )
+        if (resumePosition > 0L) {
+            withPlayer {
+                seekTo(resumePosition)
+            }
+            lastStablePositionMs = resumePosition
+            lastPositionUpdateElapsed = SystemClock.elapsedRealtime()
+            lastPublishedPositionMs = resumePosition
+            _uiState.value = _uiState.value.copy(positionMs = resumePosition)
+            persistPlaybackSnapshot(force = true)
+        }
+    }
+
+    private fun registerSnapshotPersistenceCallbacks(context: Context) {
+        (context as? Application)?.registerActivityLifecycleCallbacks(
+            object : Application.ActivityLifecycleCallbacks {
+                override fun onActivityStopped(activity: Activity) {
+                    persistPlaybackSnapshot(force = true)
+                }
+
+                override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) = Unit
+                override fun onActivityStarted(activity: Activity) = Unit
+                override fun onActivityResumed(activity: Activity) = Unit
+                override fun onActivityPaused(activity: Activity) = Unit
+                override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) = Unit
+                override fun onActivityDestroyed(activity: Activity) = Unit
+            },
+        )
+    }
+
+    private fun persistPlaybackSnapshot(force: Boolean = false) {
+        val state = _uiState.value
+        val currentTrack = state.currentTrack ?: return
+        val nowElapsed = SystemClock.elapsedRealtime()
+        if (
+            !force &&
+            nowElapsed - lastSavedSnapshotElapsed < PLAYBACK_SNAPSHOT_SAVE_INTERVAL_MS
+        ) {
+            return
+        }
+        lastSavedSnapshotElapsed = nowElapsed
+        val durationMs = state.durationMs.takeIf { it > 0L } ?: currentTrack.durationMs
+        val positionMs = sanitizeRestoredPositionMs(state.positionMs, durationMs)
+        appScope.launch {
+            queueRepository.upsertPlaybackSnapshot(
+                PlaybackSnapshot(
+                    currentTrackId = currentTrack.id,
+                    currentIndex = state.currentIndex.coerceAtLeast(0),
+                    positionMs = positionMs,
+                    durationMs = durationMs,
+                    savedAtMs = System.currentTimeMillis(),
+                ),
+            )
+        }
     }
 
     private suspend fun recoverCurrentTrack(reason: String) {
@@ -1022,5 +1268,10 @@ class PlaybackCoordinator @Inject constructor(
             positionMs = currentPosition,
             durationMs = duration,
         )
+        persistPlaybackSnapshot(force = force)
     }
+}
+
+private fun Long.floorToSecondMs(): Long {
+    return (this.coerceAtLeast(0L) / 1_000L) * 1_000L
 }

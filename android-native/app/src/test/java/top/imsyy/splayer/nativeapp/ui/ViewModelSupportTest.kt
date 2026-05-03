@@ -80,6 +80,36 @@ class ViewModelSupportTest {
     }
 
     @Test
+    fun `sanitizeLoadErrorMessage keeps first install local api from asking for api root`() {
+        val message = sanitizeLoadErrorMessage(
+            rawMessage = "请先在设置中填写 API 根路径",
+            fallback = "加载首页失败",
+        )
+
+        assertEquals("加载首页失败，请稍后重试", message)
+    }
+
+    @Test
+    fun `sanitizeLoadErrorMessage maps remote empty api root to mode specific hint`() {
+        val message = sanitizeLoadErrorMessage(
+            rawMessage = "远程 API 模式需要 API 根路径",
+            fallback = "加载发现页失败",
+        )
+
+        assertEquals("远程 API 模式需要先填写 API 根路径，或切回本地 API 模式登录/使用", message)
+    }
+
+    @Test
+    fun `sanitizeLoadErrorMessage maps unauthenticated errors to netease login hint`() {
+        val message = sanitizeLoadErrorMessage(
+            rawMessage = "请先在设置中填写 API 根路径后登录",
+            fallback = "加载我的页面失败",
+        )
+
+        assertEquals("请先登录网易云账号", message)
+    }
+
+    @Test
     fun `resolveCommentPreviewCount keeps cached comment count visible before sheet opens`() {
         val hot = CommentPageResult(
             comments = listOf(sampleComment(id = 1L)),

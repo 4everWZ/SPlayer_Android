@@ -130,6 +130,8 @@ fun SPlayerNativeApp() {
                                     track = track,
                                     isPlaying = miniPlayerState.isPlaying,
                                     queueCount = if (chromeState.showQueueCount) miniPlayerState.queueCount else 0,
+                                    positionMs = miniPlayerState.positionMs,
+                                    durationMs = miniPlayerState.durationMs,
                                     onOpenPlayer = { navController.navigate(Routes.Player) },
                                     onTogglePlay = playerViewModel::togglePlayback,
                                     onOpenQueue = {
