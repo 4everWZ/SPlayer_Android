@@ -193,7 +193,7 @@ fun PlayerScreen(
                     if (lyricMode) {
                         LyricStage(
                             lyrics = screenState.lyrics,
-                            currentPositionMs = playbackState.positionMs,
+                            currentPositionMs = resolveLyricDisplayPositionMs(playbackState.positionMs),
                             loading = screenState.lyricLoading,
                             showTranslation = screenState.showTranslation,
                             showRomanized = screenState.showRomanized,
@@ -1362,6 +1362,12 @@ internal fun List<LyricLineUi>.indexOfCurrentLine(positionMs: Long): Int {
     if (boundedCandidate >= 0) return boundedCandidate
     val trailingCandidate = indexOfLast { it.startTimeMs <= positionMs }
     return if (trailingCandidate >= 0) trailingCandidate else 0
+}
+
+internal const val LYRIC_DISPLAY_ADVANCE_MS = 500L
+
+internal fun resolveLyricDisplayPositionMs(positionMs: Long): Long {
+    return (positionMs + LYRIC_DISPLAY_ADVANCE_MS).coerceAtLeast(0L)
 }
 
 internal fun hasWordLevelLyricAtPosition(

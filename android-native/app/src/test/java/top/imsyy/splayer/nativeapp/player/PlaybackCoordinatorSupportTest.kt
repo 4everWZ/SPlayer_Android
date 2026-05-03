@@ -79,7 +79,7 @@ class PlaybackCoordinatorSupportTest {
     }
 
     @Test
-    fun `resolveProgressLoopIntervalMs drops to line level cadence when lyrics have no true word timing`() {
+    fun `resolveProgressLoopIntervalMs keeps low power cadence outside lyric page`() {
         assertEquals(
             2_000L,
             resolveProgressLoopIntervalMs(
@@ -96,8 +96,12 @@ class PlaybackCoordinatorSupportTest {
                 wordLevelLyricActive = false,
             ),
         )
+    }
+
+    @Test
+    fun `resolveProgressLoopIntervalMs uses responsive lyric cadence even without word timing`() {
         assertEquals(
-            900L,
+            160L,
             resolveProgressLoopIntervalMs(
                 playerScreenActive = true,
                 lyricScreenActive = true,

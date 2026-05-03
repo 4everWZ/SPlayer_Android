@@ -99,7 +99,7 @@ internal fun resolveProgressLoopIntervalMs(
 ): Long {
     return when {
         playerScreenActive && lyricScreenActive && wordLevelLyricActive -> 160L
-        playerScreenActive && lyricScreenActive -> 900L
+        playerScreenActive && lyricScreenActive -> 160L
         playerScreenActive -> 900L
         else -> 2_000L
     }

@@ -60,8 +60,15 @@ jobs:
           release_title="Android Native Debug APK ${APK_VERSION}"
           git tag "$tag_name" "$GITHUB_SHA"
           git push origin "$tag_name"
+          updates="$(git log --no-merges --pretty=format:'- %s (%h)' -n 12 "$GITHUB_SHA")"
           cat > release_notes.md <<EOF
-          Android Native debug APK
+          Android Native debug APK 自动构建
+
+          ## 更新内容
+
+          ${updates}
+
+          ## 构建信息
 
           - Version: ${APK_VERSION}
           - Commit: ${GITHUB_SHA}

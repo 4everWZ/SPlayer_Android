@@ -210,6 +210,24 @@ class PlayerScreenSupportTest {
     }
 
     @Test
+    fun `resolveLyricDisplayPositionMs advances lyric display without changing player seek`() {
+        assertEquals(500L, resolveLyricDisplayPositionMs(0L))
+        assertEquals(1_400L, resolveLyricDisplayPositionMs(900L))
+        assertEquals(0L, resolveLyricDisplayPositionMs(-800L))
+    }
+
+    @Test
+    fun `lyric index uses advanced display position to avoid visible late highlight`() {
+        val lyrics = listOf(
+            LyricLineUi(startTimeMs = 0L, endTimeMs = 1_000L, mainText = "第一句"),
+            LyricLineUi(startTimeMs = 1_000L, endTimeMs = 2_000L, mainText = "第二句"),
+        )
+
+        assertEquals(0, lyrics.indexOfCurrentLine(900L))
+        assertEquals(1, lyrics.indexOfCurrentLine(resolveLyricDisplayPositionMs(900L)))
+    }
+
+    @Test
     fun `disc rotation runs only during active playback`() {
         assertTrue(shouldRunDiscRotation(isPlaying = true, isBuffering = false))
         assertFalse(shouldRunDiscRotation(isPlaying = false, isBuffering = false))
