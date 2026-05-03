@@ -31,6 +31,7 @@ import top.imsyy.splayer.nativeapp.data.local.AppSettingsStore
 import top.imsyy.splayer.nativeapp.data.local.configuredApiRoot
 import top.imsyy.splayer.nativeapp.data.local.configuredUnlockServerMode
 import top.imsyy.splayer.nativeapp.data.repository.LyricsPreferences
+import top.imsyy.splayer.nativeapp.data.repository.NeteaseLoginRepository
 import top.imsyy.splayer.nativeapp.data.repository.QueueRepository
 import top.imsyy.splayer.nativeapp.data.repository.SPlayerRemoteRepository
 import top.imsyy.splayer.nativeapp.model.AlbumDetailUi
@@ -1480,6 +1481,11 @@ data class SettingsUiState(
     val qrStatusText: String = "未开始",
     val qrLoading: Boolean = false,
     val qrVisible: Boolean = false,
+    val phoneInput: String = "",
+    val captchaInput: String = "",
+    val countryCodeInput: String = "86",
+    val phoneLoginLoading: Boolean = false,
+    val phoneLoginStatusText: String = "",
     val showTranslation: Boolean = true,
     val showRomanized: Boolean = false,
     val autoPlay: Boolean = true,
@@ -1491,7 +1497,7 @@ data class SettingsUiState(
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
-    private val remoteRepository: SPlayerRemoteRepository,
+    private val loginRepository: NeteaseLoginRepository,
     private val appSettingsStore: AppSettingsStore,
     private val lyricsPreferences: LyricsPreferences,
     private val queueRepository: QueueRepository,
@@ -1502,7 +1508,6 @@ class SettingsViewModel @Inject constructor(
     private var qrPollingJob: Job? = null
 
     init {
-        refreshAccount()
         viewModelScope.launch {
             appSettingsStore.settings.collect { settings ->
                 _uiState.value = _uiState.value.copy(
@@ -1545,8 +1550,8 @@ class SettingsViewModel @Inject constructor(
                 qrStatusText = "生成二维码中",
             )
             runCatching {
-                val key = remoteRepository.fetchQrKey()
-                val qrImage = remoteRepository.fetchQrImage(key)
+                val key = loginRepository.fetchQrKey()
+                val qrImage = loginRepository.fetchQrImage(key)
                 if (!isActive) return@launch
                 _uiState.value = _uiState.value.copy(
                     qrImageUrl = qrImage,
@@ -1557,7 +1562,7 @@ class SettingsViewModel @Inject constructor(
                 qrPollingJob = launch {
                     while (isActive && _uiState.value.qrVisible && _uiState.value.currentUser == null) {
                         delay(2_000)
-                        val result = remoteRepository.checkQrState(key)
+                        val result = loginRepository.checkQrState(key)
                         if (result.cookieHeader.isNotBlank()) {
                             appSettingsStore.updateCookiesFromHeader(result.cookieHeader)
                         }
@@ -1599,6 +1604,109 @@ class SettingsViewModel @Inject constructor(
             if (qrLoginJob === loginJob) {
                 qrLoginJob = null
             }
+        }
+    }
+
+    fun setPhoneInput(value: String) {
+        _uiState.value = _uiState.value.copy(phoneInput = value.filter { it.isDigit() })
+    }
+
+    fun setCaptchaInput(value: String) {
+        _uiState.value = _uiState.value.copy(captchaInput = value.filter { it.isDigit() })
+    }
+
+    fun setCountryCodeInput(value: String) {
+        _uiState.value = _uiState.value.copy(countryCodeInput = value.filter { it.isDigit() }.ifBlank { "86" })
+    }
+
+    fun sendCaptcha() {
+        val state = _uiState.value
+        val phone = state.phoneInput
+        if (phone.isBlank()) {
+            _uiState.value = state.copy(phoneLoginStatusText = "请先输入手机号")
+            return
+        }
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(phoneLoginLoading = true, phoneLoginStatusText = "正在发送验证码")
+            runCatching {
+                loginRepository.sendCaptcha(phone = phone, countryCode = _uiState.value.countryCodeInput)
+            }.onSuccess { result ->
+                _uiState.value = _uiState.value.copy(
+                    phoneLoginLoading = false,
+                    phoneLoginStatusText = if (result.code == 200) "验证码已发送" else "验证码发送失败",
+                )
+            }.onFailure { error ->
+                if (error is CancellationException) throw error
+                _uiState.value = _uiState.value.copy(
+                    phoneLoginLoading = false,
+                    phoneLoginStatusText = error.message ?: "验证码发送失败",
+                )
+            }
+        }
+    }
+
+    fun loginWithCaptcha() {
+        val state = _uiState.value
+        val phone = state.phoneInput
+        val captcha = state.captchaInput
+        if (phone.isBlank() || captcha.isBlank()) {
+            _uiState.value = state.copy(phoneLoginStatusText = "请输入手机号和验证码")
+            return
+        }
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(phoneLoginLoading = true, phoneLoginStatusText = "正在登录")
+            runCatching {
+                val countryCode = _uiState.value.countryCodeInput
+                val verify = loginRepository.verifyCaptcha(phone = phone, captcha = captcha, countryCode = countryCode)
+                if (verify.code != 200) return@runCatching verify
+                loginRepository.loginCellphone(phone = phone, captcha = captcha, countryCode = countryCode)
+            }.onSuccess { result ->
+                if (result.cookieHeader.isNotBlank()) {
+                    appSettingsStore.updateCookiesFromHeader(result.cookieHeader)
+                }
+                val user = fetchLoginStateWithRetry()
+                if (user != null) {
+                    appSettingsStore.setAccount(user.userId, user.nickname, user.avatarUrl)
+                }
+                _uiState.value = _uiState.value.copy(
+                    currentUser = user ?: _uiState.value.currentUser,
+                    phoneLoginLoading = false,
+                    phoneLoginStatusText = if (result.code == 200) "登录成功" else "登录失败",
+                )
+            }.onFailure { error ->
+                if (error is CancellationException) throw error
+                _uiState.value = _uiState.value.copy(
+                    phoneLoginLoading = false,
+                    phoneLoginStatusText = error.message ?: "登录失败",
+                )
+            }
+        }
+    }
+
+    fun refreshLogin() {
+        viewModelScope.launch {
+            runCatching {
+                loginRepository.refreshLogin()
+            }.onSuccess { result ->
+                if (result.cookieHeader.isNotBlank()) {
+                    appSettingsStore.updateCookiesFromHeader(result.cookieHeader)
+                }
+                refreshAccount()
+            }
+        }
+    }
+
+    fun logout() {
+        viewModelScope.launch {
+            runCatching {
+                loginRepository.logout()
+            }
+            appSettingsStore.clearAccount()
+            _uiState.value = _uiState.value.copy(
+                currentUser = null,
+                qrVisible = false,
+                phoneLoginStatusText = "已退出登录",
+            )
         }
     }
 
@@ -1729,7 +1837,7 @@ class SettingsViewModel @Inject constructor(
 
     private suspend fun fetchLoginStateWithRetry(maxAttempts: Int = 5): UserAccountUi? {
         repeat(maxAttempts) { index ->
-            val user = runCatching { remoteRepository.fetchLoginState() }.getOrNull()
+            val user = runCatching { loginRepository.fetchLoginState() }.getOrNull()
             if (user != null) return user
             if (index < maxAttempts - 1) {
                 delay(800)

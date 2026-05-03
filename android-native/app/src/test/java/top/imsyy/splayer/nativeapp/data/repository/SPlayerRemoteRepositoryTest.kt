@@ -656,6 +656,42 @@ class SPlayerRemoteRepositoryTest {
     }
 
     @Test
+    fun `resolveSongSource in blank api root local mode skips remote official and uses native direct unlock`() = runBlocking {
+        val api = FakeApiService(
+            responses = mapOf(
+                "https://music-api.gdstudio.xyz/api.php" to """
+                    {
+                      "url": "http://m801.music.126.net/local.mp3",
+                      "br": 320000
+                    }
+                """.trimIndent(),
+            ),
+        )
+        val repository = SPlayerRemoteRepository(
+            api = api,
+            apiRootProvider = { "" },
+            requireApiRoot = true,
+        )
+
+        val source = repository.resolveSongSource(
+            track = TrackItem(
+                id = 912L,
+                name = "本地解锁歌曲",
+                artists = "测试歌手",
+                album = "测试专辑",
+                coverUrl = "",
+                durationMs = 180_000L,
+            ),
+            tryOfficial = true,
+            enabledUnlockServers = listOf("native-netease"),
+        )
+
+        assertEquals("https://m801.music.126.net/local.mp3", source.url)
+        assertEquals("native-netease", source.source)
+        assertEquals(listOf("https://music-api.gdstudio.xyz/api.php"), api.calls.map { it.url })
+    }
+
+    @Test
     fun `resolveSongSource skips official trial url and continues with unlock source`() = runBlocking {
         val api = FakeApiService(
             responses = mapOf(

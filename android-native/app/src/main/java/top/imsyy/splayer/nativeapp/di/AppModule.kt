@@ -25,6 +25,10 @@ import top.imsyy.splayer.nativeapp.data.local.AppSettingsStore
 import top.imsyy.splayer.nativeapp.data.local.PlaylistDetailCacheDao
 import top.imsyy.splayer.nativeapp.data.local.SPlayerDatabase
 import top.imsyy.splayer.nativeapp.data.repository.SPlayerRemoteRepository
+import top.imsyy.splayer.nativeapp.data.repository.NeteaseLoginClient
+import top.imsyy.splayer.nativeapp.data.repository.NativeNeteaseCookies
+import top.imsyy.splayer.nativeapp.data.repository.NativeNeteaseLoginClient
+import top.imsyy.splayer.nativeapp.data.repository.OkHttpNativeNeteaseHttpTransport
 
 @Qualifier
 annotation class ApplicationScope
@@ -152,6 +156,24 @@ object AppModule {
             apiRootProvider = { appSettingsStore.currentApiRoot() },
             requireApiRoot = true,
             playlistDetailCacheDao = playlistDetailCacheDao,
+        )
+    }
+
+    @Provides
+    fun provideNativeNeteaseLoginClient(
+        okHttpClient: OkHttpClient,
+        appSettingsStore: AppSettingsStore,
+    ): NeteaseLoginClient {
+        return NativeNeteaseLoginClient(
+            cookieProvider = {
+                val settings = appSettingsStore.settings.value
+                NativeNeteaseCookies(
+                    musicU = settings.musicU,
+                    csrf = settings.csrf,
+                    nmtid = settings.nmtid,
+                )
+            },
+            transport = OkHttpNativeNeteaseHttpTransport(okHttpClient),
         )
     }
 }

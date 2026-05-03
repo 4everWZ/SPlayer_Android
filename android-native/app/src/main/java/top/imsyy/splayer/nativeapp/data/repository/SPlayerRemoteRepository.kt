@@ -210,6 +210,65 @@ class SPlayerRemoteRepository(
         )
     }
 
+    suspend fun refreshLogin(): LoginMutationResult {
+        return getNetease("login/refresh", mapOf("timestamp" to now())).toRemoteLoginMutationResult()
+    }
+
+    suspend fun logout(): LoginMutationResult {
+        return getNetease("logout", mapOf("timestamp" to now())).toRemoteLoginMutationResult()
+    }
+
+    suspend fun sendCaptcha(phone: String, countryCode: String = "86"): LoginMutationResult {
+        return getNetease(
+            "captcha/sent",
+            mapOf(
+                "phone" to phone,
+                "ctcode" to countryCode,
+                "timestamp" to now(),
+            ),
+        ).toRemoteLoginMutationResult()
+    }
+
+    suspend fun verifyCaptcha(
+        phone: String,
+        captcha: String,
+        countryCode: String = "86",
+    ): LoginMutationResult {
+        return getNetease(
+            "captcha/verify",
+            mapOf(
+                "phone" to phone,
+                "captcha" to captcha,
+                "ctcode" to countryCode,
+                "timestamp" to now(),
+            ),
+        ).toRemoteLoginMutationResult()
+    }
+
+    suspend fun loginCellphone(
+        phone: String,
+        captcha: String? = null,
+        password: String? = null,
+        countryCode: String = "86",
+    ): LoginMutationResult {
+        val params = linkedMapOf(
+            "phone" to phone,
+            "ctcode" to countryCode,
+            "timestamp" to now(),
+        )
+        if (!captcha.isNullOrBlank()) {
+            params["captcha"] = captcha
+        } else {
+            require(!password.isNullOrBlank()) { "手机号登录需要验证码或密码" }
+            params["password"] = password
+        }
+        return getNetease("login/cellphone", params).toRemoteLoginMutationResult()
+    }
+
+    suspend fun fetchCountryCodeList(): String {
+        return getRaw("netease/countries/code/list", mapOf("timestamp" to now()))
+    }
+
     suspend fun fetchPersonalizedPlaylists(limit: Int = 12): List<PlaylistItem> {
         return getNetease("personalized", mapOf("limit" to limit.toString()))
             .array("result")
@@ -1785,3 +1844,11 @@ private fun JsonObject.long(key: String): Long = (this[key] as? JsonPrimitive)?.
 private fun JsonObject.int(key: String): Int = (this[key] as? JsonPrimitive)?.intOrNull ?: 0
 
 private fun JsonObject.boolean(key: String): Boolean = (this[key] as? JsonPrimitive)?.booleanOrNull ?: false
+
+private fun JsonObject.toRemoteLoginMutationResult(): LoginMutationResult {
+    return LoginMutationResult(
+        code = int("code"),
+        body = toString(),
+        cookieHeader = string("cookie"),
+    )
+}

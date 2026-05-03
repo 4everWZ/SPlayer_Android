@@ -36,6 +36,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
@@ -70,7 +71,7 @@ fun SettingsScreen(
         item {
             SettingsSectionCard(
                 title = "账号",
-                description = "Native V2 首阶段继续复用远程 /splayer/* 登录链路",
+                description = "未配置 API 根路径时使用 Android 原生登录；配置后复用外部 /splayer/* 登录链路",
             ) {
                 val qrBitmap = remember(state.qrImageUrl) {
                     extractQrBase64Payload(state.qrImageUrl)?.let { payload ->
@@ -100,6 +101,70 @@ fun SettingsScreen(
                 } ?: Text("未登录")
                 Button(onClick = viewModel::startQrLogin) {
                     Text(if (state.currentUser == null) "二维码登录" else "重新登录")
+                }
+                OutlinedTextField(
+                    value = state.countryCodeInput,
+                    onValueChange = viewModel::setCountryCodeInput,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("国家码") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Next),
+                )
+                OutlinedTextField(
+                    value = state.phoneInput,
+                    onValueChange = viewModel::setPhoneInput,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("手机号") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone, imeAction = ImeAction.Next),
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    OutlinedTextField(
+                        value = state.captchaInput,
+                        onValueChange = viewModel::setCaptchaInput,
+                        modifier = Modifier.weight(1f),
+                        label = { Text("验证码") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
+                    )
+                    Button(
+                        onClick = viewModel::sendCaptcha,
+                        enabled = !state.phoneLoginLoading,
+                    ) {
+                        Text("发送验证码")
+                    }
+                }
+                Button(
+                    onClick = viewModel::loginWithCaptcha,
+                    enabled = !state.phoneLoginLoading,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("手机号登录")
+                }
+                if (state.currentUser != null) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Button(
+                            onClick = viewModel::refreshLogin,
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text("刷新登录")
+                        }
+                        Button(
+                            onClick = viewModel::logout,
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text("退出登录")
+                        }
+                    }
+                }
+                if (state.phoneLoginStatusText.isNotBlank()) {
+                    Text(state.phoneLoginStatusText, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 if (state.qrVisible) {
                     if (state.qrLoading) {
@@ -219,7 +284,7 @@ fun SettingsScreen(
                     if (state.unlockServerMode == UnlockServerMode.EXTERNAL) {
                         "当前播放源解析会先请求 API 根路径下的 /unblock/*；netease 无结果时回退到原生直连解锁。"
                     } else {
-                        "当前播放源解析使用原生本地解锁，不加载桌面本地 unlock 服务。登录、发现和歌单仍需要 API 根路径。"
+                        "当前播放源解析使用原生本地解锁，不加载桌面本地 unlock 服务。本地登录能力与远程登录 API 对齐，包含二维码、验证码、手机号、刷新、登出和国家码；推荐、发现、歌单和搜索仍需要 API 根路径。"
                     },
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
