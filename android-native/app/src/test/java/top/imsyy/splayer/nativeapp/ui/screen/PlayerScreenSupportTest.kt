@@ -1,5 +1,6 @@
 package top.imsyy.splayer.nativeapp.ui.screen
 
+import java.io.File
 import top.imsyy.splayer.nativeapp.model.LyricLineUi
 import top.imsyy.splayer.nativeapp.model.LyricWordUi
 import org.junit.Assert.assertEquals
@@ -220,6 +221,14 @@ class PlayerScreenSupportTest {
         assertEquals(0f, normalizeDiscRotation(0f), 0.01f)
         assertEquals(12f, normalizeDiscRotation(372f), 0.01f)
         assertEquals(350f, normalizeDiscRotation(-10f), 0.01f)
+    }
+
+    @Test
+    fun `rotating disc does not draw a center dot over album cover`() {
+        val source = File("src/main/java/top/imsyy/splayer/nativeapp/ui/screen/PlayerScreen.kt").readText()
+
+        assertFalse(source.contains("layout.discSizeDp * 0.062f"))
+        assertFalse(source.contains("Color(0xFF2E3441)"))
     }
 
     @Test

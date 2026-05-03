@@ -37,7 +37,7 @@ jobs:
         run: |
           base_version=$(node -p "require('./package.json').version.split('-')[0]")
           short_sha="${GITHUB_SHA::7}"
-          version="${base_version}+native.${GITHUB_RUN_NUMBER}.${short_sha}"
+          version="${base_version}+native.${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}.${short_sha}"
           apk_name="splayer-native-v2-debug-${version}.apk"
           echo "version=${version}" >> "$GITHUB_OUTPUT"
           echo "apk_name=${apk_name}" >> "$GITHUB_OUTPUT"
@@ -56,10 +56,10 @@ jobs:
           APK_VERSION: ${{ steps.apk-version.outputs.version }}
         shell: bash
         run: |
-          tag_name="android-native-debug"
-          release_title="Android Native Debug APK"
-          git tag -f "$tag_name" "$GITHUB_SHA"
-          git push -f origin "$tag_name"
+          tag_name="android-native-debug-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}-${GITHUB_SHA::7}"
+          release_title="Android Native Debug APK ${APK_VERSION}"
+          git tag "$tag_name" "$GITHUB_SHA"
+          git push origin "$tag_name"
           cat > release_notes.md <<EOF
           Android Native debug APK
 
@@ -67,16 +67,9 @@ jobs:
           - Commit: ${GITHUB_SHA}
           - Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
           EOF
-          if ! gh release view "$tag_name" >/dev/null 2>&1; then
-            gh release create "$tag_name" \
-              --title "$release_title" \
-              --notes-file release_notes.md \
-              --prerelease \
-              --target "$GITHUB_SHA"
-          fi
-          gh release edit "$tag_name" \
+          gh release create "$tag_name" \
             --title "$release_title" \
             --notes-file release_notes.md \
             --prerelease \
             --target "$GITHUB_SHA"
-          gh release upload "$tag_name" "$APK_NAME" --clobber
+          gh release upload "$tag_name" "$APK_NAME"

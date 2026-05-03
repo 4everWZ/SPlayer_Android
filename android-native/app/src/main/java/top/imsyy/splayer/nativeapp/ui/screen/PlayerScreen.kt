@@ -691,12 +691,6 @@ private fun CoverStage(
                                 .clip(CircleShape),
                             contentScale = ContentScale.Crop,
                         )
-                        Box(
-                            modifier = Modifier
-                                .size((layout.discSizeDp * 0.062f).dp)
-                                .clip(CircleShape)
-                                .background(Color(0xFF2E3441)),
-                        )
                     }
                 }
             }
