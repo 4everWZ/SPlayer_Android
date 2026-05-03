@@ -31,7 +31,6 @@ import top.imsyy.splayer.nativeapp.data.local.AppSettingsStore
 import top.imsyy.splayer.nativeapp.data.local.configuredApiRoot
 import top.imsyy.splayer.nativeapp.data.local.configuredUnlockServerMode
 import top.imsyy.splayer.nativeapp.data.repository.LyricsPreferences
-import top.imsyy.splayer.nativeapp.data.repository.NeteaseLoginRepository
 import top.imsyy.splayer.nativeapp.data.repository.QueueRepository
 import top.imsyy.splayer.nativeapp.data.repository.SPlayerRemoteRepository
 import top.imsyy.splayer.nativeapp.model.AlbumDetailUi
@@ -55,6 +54,7 @@ import top.imsyy.splayer.nativeapp.model.ThemeMode
 import top.imsyy.splayer.nativeapp.model.UnlockServerMode
 import top.imsyy.splayer.nativeapp.model.UserAccountUi
 import top.imsyy.splayer.nativeapp.player.PlaybackCoordinator
+import top.imsyy.splayer.nativeapp.player.PlaybackQueueSource
 import top.imsyy.splayer.nativeapp.player.resolveNextPlayMode
 import top.imsyy.splayer.nativeapp.ui.navigation.Routes
 import android.content.Context
@@ -191,6 +191,7 @@ class HomeViewModel @Inject constructor(
     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
     private var latestDiscoveryHome = DiscoveryHomeUi()
     private var refreshJob: Job? = null
+    private var observedApiRoot = appSettingsStore.apiRoot
 
     private val recentFlow = queueRepository.observeRecent().stateIn(
         viewModelScope,
@@ -209,6 +210,11 @@ class HomeViewModel @Inject constructor(
         }
         viewModelScope.launch {
             appSettingsStore.settings.collect { settings ->
+                val nextApiRoot = configuredApiRoot(settings)
+                if (shouldRefreshAfterApiRootChange(observedApiRoot, nextApiRoot)) {
+                    refresh(forceRefresh = true, showLoading = false)
+                }
+                observedApiRoot = nextApiRoot
                 _uiState.value = _uiState.value.copy(currentUser = settings.toStoredUserOrNull())
             }
         }
@@ -291,13 +297,24 @@ data class DiscoveryUiState(
 @HiltViewModel
 class DiscoveryViewModel @Inject constructor(
     private val discoveryRefreshCoordinator: DiscoveryRefreshCoordinator,
+    private val appSettingsStore: AppSettingsStore,
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(DiscoveryUiState())
     val uiState: StateFlow<DiscoveryUiState> = _uiState.asStateFlow()
     private var refreshJob: Job? = null
+    private var observedApiRoot = appSettingsStore.apiRoot
 
     init {
         refresh()
+        viewModelScope.launch {
+            appSettingsStore.settings.collect { settings ->
+                val nextApiRoot = configuredApiRoot(settings)
+                if (shouldRefreshAfterApiRootChange(observedApiRoot, nextApiRoot)) {
+                    refresh(forceRefresh = true, showLoading = false)
+                }
+                observedApiRoot = nextApiRoot
+            }
+        }
     }
 
     fun refresh(
@@ -604,6 +621,7 @@ data class RadioDetailUiState(
 class PlaylistDetailViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val remoteRepository: SPlayerRemoteRepository,
+    private val playbackCoordinator: PlaybackCoordinator,
 ) : ViewModel() {
     private companion object {
         const val PLAYLIST_FIRST_SCREEN_TARGET = 80
@@ -732,6 +750,7 @@ class PlaylistDetailViewModel @Inject constructor(
                 hasMore = pageResult.hasMore,
                 appendErrorMessage = null,
             )
+            syncActivePlaylistQueue(latestPlaylist.id, pageResult.tracks)
         }.onFailure { error ->
             _uiState.value = _uiState.value.copy(
                 primingFirstPage = false,
@@ -767,6 +786,7 @@ class PlaylistDetailViewModel @Inject constructor(
                     hasMore = pageResult.hasMore,
                     appendErrorMessage = null,
                 )
+                syncActivePlaylistQueue(latestPlaylist.id, pageResult.tracks)
             }.onFailure { error ->
                 _uiState.value = _uiState.value.copy(
                     isAppending = false,
@@ -817,6 +837,7 @@ class PlaylistDetailViewModel @Inject constructor(
                 playlist = playlist.copy(tracks = mergedTracks),
                 hasMore = pageResult.hasMore,
             )
+            playbackCoordinator.updatePlaylistQueueIfActive(playlist.id, mergedTracks)
             canContinue = pageResult.hasMore
         }
         _uiState.value = _uiState.value.copy(
@@ -825,6 +846,12 @@ class PlaylistDetailViewModel @Inject constructor(
             appendErrorMessage = null,
         )
         return mergedTracks
+    }
+
+    private fun syncActivePlaylistQueue(playlistId: Long, tracks: List<TrackItem>) {
+        viewModelScope.launch {
+            playbackCoordinator.updatePlaylistQueueIfActive(playlistId, tracks)
+        }
     }
 
     private fun shouldPrimeFirstPage(playlist: PlaylistDetailUi): Boolean {
@@ -1057,14 +1084,25 @@ class PlayerViewModel @Inject constructor(
         tracks: List<TrackItem>,
         startIndex: Int = 0,
         keepRequestedTrackFirstInShuffle: Boolean = true,
+        queueSource: PlaybackQueueSource = PlaybackQueueSource.None,
     ) {
         if (tracks.isEmpty()) return
         viewModelScope.launch {
+            val syncRequest = resolvePlaylistQueueSyncRequest(
+                queueSource = queueSource,
+                cachedPlaylist = (queueSource as? PlaybackQueueSource.Playlist)
+                    ?.let { source -> remoteRepository.peekCachedPlaylistDetail(source.playlistId) },
+            )
             playbackCoordinator.playTracks(
                 tracks = tracks,
                 startIndex = startIndex.coerceIn(0, tracks.lastIndex),
                 keepRequestedTrackFirstInShuffle = keepRequestedTrackFirstInShuffle,
+                queueSource = queueSource,
+                knownLoadedTracks = syncRequest?.tracks,
             )
+            if (syncRequest != null) {
+                playbackCoordinator.updatePlaylistQueueIfActive(syncRequest.playlistId, syncRequest.tracks)
+            }
         }
     }
 
@@ -1369,6 +1407,11 @@ internal data class PlaylistPlaybackRequest(
     val shouldStartPlayback: Boolean = true,
 )
 
+internal data class PlaylistQueueSyncRequest(
+    val playlistId: Long,
+    val tracks: List<TrackItem>,
+)
+
 internal fun resolvePlaylistPlaybackRequest(
     clickedTrackId: Long,
     loadedTracks: List<TrackItem>,
@@ -1390,6 +1433,22 @@ internal fun resolvePlaylistPlaybackRequest(
         tracks = loadedTracks,
         startIndex = resolvedIndex,
         shouldStartPlayback = currentTrackId != clickedTrackId,
+    )
+}
+
+internal fun resolvePlaylistQueueSyncRequest(
+    queueSource: PlaybackQueueSource,
+    cachedPlaylist: PlaylistDetailUi?,
+): PlaylistQueueSyncRequest? {
+    val playlistId = (queueSource as? PlaybackQueueSource.Playlist)?.playlistId ?: return null
+    val tracks = cachedPlaylist
+        ?.takeIf { playlist -> playlist.id == playlistId }
+        ?.tracks
+        .orEmpty()
+    if (tracks.isEmpty()) return null
+    return PlaylistQueueSyncRequest(
+        playlistId = playlistId,
+        tracks = tracks,
     )
 }
 
@@ -1416,6 +1475,13 @@ internal fun shouldStartDiscoveryRefresh(
     forceRefresh: Boolean,
 ): Boolean {
     return !refreshInProgress || forceRefresh
+}
+
+internal fun shouldRefreshAfterApiRootChange(
+    previousApiRoot: String,
+    nextApiRoot: String,
+): Boolean {
+    return previousApiRoot.isBlank() && nextApiRoot.isNotBlank()
 }
 
 private fun DiscoveryHomeUi.hasDiscoveryHomeContent(): Boolean {
@@ -1481,11 +1547,6 @@ data class SettingsUiState(
     val qrStatusText: String = "未开始",
     val qrLoading: Boolean = false,
     val qrVisible: Boolean = false,
-    val phoneInput: String = "",
-    val captchaInput: String = "",
-    val countryCodeInput: String = "86",
-    val phoneLoginLoading: Boolean = false,
-    val phoneLoginStatusText: String = "",
     val showTranslation: Boolean = true,
     val showRomanized: Boolean = false,
     val autoPlay: Boolean = true,
@@ -1497,7 +1558,7 @@ data class SettingsUiState(
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
-    private val loginRepository: NeteaseLoginRepository,
+    private val remoteRepository: SPlayerRemoteRepository,
     private val appSettingsStore: AppSettingsStore,
     private val lyricsPreferences: LyricsPreferences,
     private val queueRepository: QueueRepository,
@@ -1550,8 +1611,8 @@ class SettingsViewModel @Inject constructor(
                 qrStatusText = "生成二维码中",
             )
             runCatching {
-                val key = loginRepository.fetchQrKey()
-                val qrImage = loginRepository.fetchQrImage(key)
+                val key = remoteRepository.fetchQrKey()
+                val qrImage = remoteRepository.fetchQrImage(key)
                 if (!isActive) return@launch
                 _uiState.value = _uiState.value.copy(
                     qrImageUrl = qrImage,
@@ -1562,7 +1623,7 @@ class SettingsViewModel @Inject constructor(
                 qrPollingJob = launch {
                     while (isActive && _uiState.value.qrVisible && _uiState.value.currentUser == null) {
                         delay(2_000)
-                        val result = loginRepository.checkQrState(key)
+                        val result = remoteRepository.checkQrState(key)
                         if (result.cookieHeader.isNotBlank()) {
                             appSettingsStore.updateCookiesFromHeader(result.cookieHeader)
                         }
@@ -1607,105 +1668,16 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    fun setPhoneInput(value: String) {
-        _uiState.value = _uiState.value.copy(phoneInput = value.filter { it.isDigit() })
-    }
-
-    fun setCaptchaInput(value: String) {
-        _uiState.value = _uiState.value.copy(captchaInput = value.filter { it.isDigit() })
-    }
-
-    fun setCountryCodeInput(value: String) {
-        _uiState.value = _uiState.value.copy(countryCodeInput = value.filter { it.isDigit() }.ifBlank { "86" })
-    }
-
-    fun sendCaptcha() {
-        val state = _uiState.value
-        val phone = state.phoneInput
-        if (phone.isBlank()) {
-            _uiState.value = state.copy(phoneLoginStatusText = "请先输入手机号")
-            return
-        }
-        viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(phoneLoginLoading = true, phoneLoginStatusText = "正在发送验证码")
-            runCatching {
-                loginRepository.sendCaptcha(phone = phone, countryCode = _uiState.value.countryCodeInput)
-            }.onSuccess { result ->
-                _uiState.value = _uiState.value.copy(
-                    phoneLoginLoading = false,
-                    phoneLoginStatusText = if (result.code == 200) "验证码已发送" else "验证码发送失败",
-                )
-            }.onFailure { error ->
-                if (error is CancellationException) throw error
-                _uiState.value = _uiState.value.copy(
-                    phoneLoginLoading = false,
-                    phoneLoginStatusText = error.message ?: "验证码发送失败",
-                )
-            }
-        }
-    }
-
-    fun loginWithCaptcha() {
-        val state = _uiState.value
-        val phone = state.phoneInput
-        val captcha = state.captchaInput
-        if (phone.isBlank() || captcha.isBlank()) {
-            _uiState.value = state.copy(phoneLoginStatusText = "请输入手机号和验证码")
-            return
-        }
-        viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(phoneLoginLoading = true, phoneLoginStatusText = "正在登录")
-            runCatching {
-                val countryCode = _uiState.value.countryCodeInput
-                val verify = loginRepository.verifyCaptcha(phone = phone, captcha = captcha, countryCode = countryCode)
-                if (verify.code != 200) return@runCatching verify
-                loginRepository.loginCellphone(phone = phone, captcha = captcha, countryCode = countryCode)
-            }.onSuccess { result ->
-                if (result.cookieHeader.isNotBlank()) {
-                    appSettingsStore.updateCookiesFromHeader(result.cookieHeader)
-                }
-                val user = fetchLoginStateWithRetry()
-                if (user != null) {
-                    appSettingsStore.setAccount(user.userId, user.nickname, user.avatarUrl)
-                }
-                _uiState.value = _uiState.value.copy(
-                    currentUser = user ?: _uiState.value.currentUser,
-                    phoneLoginLoading = false,
-                    phoneLoginStatusText = if (result.code == 200) "登录成功" else "登录失败",
-                )
-            }.onFailure { error ->
-                if (error is CancellationException) throw error
-                _uiState.value = _uiState.value.copy(
-                    phoneLoginLoading = false,
-                    phoneLoginStatusText = error.message ?: "登录失败",
-                )
-            }
-        }
-    }
-
-    fun refreshLogin() {
-        viewModelScope.launch {
-            runCatching {
-                loginRepository.refreshLogin()
-            }.onSuccess { result ->
-                if (result.cookieHeader.isNotBlank()) {
-                    appSettingsStore.updateCookiesFromHeader(result.cookieHeader)
-                }
-                refreshAccount()
-            }
-        }
-    }
-
     fun logout() {
         viewModelScope.launch {
             runCatching {
-                loginRepository.logout()
+                remoteRepository.logout()
             }
             appSettingsStore.clearAccount()
             _uiState.value = _uiState.value.copy(
                 currentUser = null,
                 qrVisible = false,
-                phoneLoginStatusText = "已退出登录",
+                qrStatusText = "已退出登录",
             )
         }
     }
@@ -1837,7 +1809,7 @@ class SettingsViewModel @Inject constructor(
 
     private suspend fun fetchLoginStateWithRetry(maxAttempts: Int = 5): UserAccountUi? {
         repeat(maxAttempts) { index ->
-            val user = runCatching { loginRepository.fetchLoginState() }.getOrNull()
+            val user = runCatching { remoteRepository.fetchLoginState() }.getOrNull()
             if (user != null) return user
             if (index < maxAttempts - 1) {
                 delay(800)

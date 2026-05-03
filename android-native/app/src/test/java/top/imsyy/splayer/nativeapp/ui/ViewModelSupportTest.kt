@@ -2,7 +2,9 @@ package top.imsyy.splayer.nativeapp.ui
 
 import top.imsyy.splayer.nativeapp.model.CommentItem
 import top.imsyy.splayer.nativeapp.model.CommentPageResult
+import top.imsyy.splayer.nativeapp.model.PlaylistDetailUi
 import top.imsyy.splayer.nativeapp.model.TrackItem
+import top.imsyy.splayer.nativeapp.player.PlaybackQueueSource
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Test
@@ -47,6 +49,14 @@ class ViewModelSupportTest {
         assertEquals(false, shouldStartDiscoveryRefresh(refreshInProgress = true, forceRefresh = false))
         assertEquals(true, shouldStartDiscoveryRefresh(refreshInProgress = true, forceRefresh = true))
         assertEquals(true, shouldStartDiscoveryRefresh(refreshInProgress = false, forceRefresh = false))
+    }
+
+    @Test
+    fun `api root activation triggers refresh only when root changes from blank to configured`() {
+        assertEquals(true, shouldRefreshAfterApiRootChange(previousApiRoot = "", nextApiRoot = "https://api.example.com/splayer"))
+        assertEquals(false, shouldRefreshAfterApiRootChange(previousApiRoot = "https://api.example.com/splayer", nextApiRoot = "https://api.example.com/splayer"))
+        assertEquals(false, shouldRefreshAfterApiRootChange(previousApiRoot = "https://api.example.com/splayer", nextApiRoot = ""))
+        assertEquals(false, shouldRefreshAfterApiRootChange(previousApiRoot = "", nextApiRoot = ""))
     }
 
     @Test
@@ -166,6 +176,29 @@ class ViewModelSupportTest {
         val loadedTracks = listOf(sampleTrack(id = 10L), sampleTrack(id = 20L), sampleTrack(id = 30L))
 
         assertEquals(5, resolvePlaylistCurrentTrackLazyIndex(30L, loadedTracks, leadingItemCount = 3))
+    }
+
+    @Test
+    fun `resolvePlaylistQueueSyncRequest replays cached loaded tracks after playlist playback starts`() {
+        val cachedPlaylist = PlaylistDetailUi(
+            id = 88L,
+            name = "测试歌单",
+            coverUrl = "",
+            description = "",
+            playCount = 0L,
+            subscribedCount = 0L,
+            trackCount = 3,
+            tracks = listOf(sampleTrack(id = 1L), sampleTrack(id = 2L), sampleTrack(id = 3L)),
+        )
+
+        val request = resolvePlaylistQueueSyncRequest(
+            queueSource = PlaybackQueueSource.Playlist(88L),
+            cachedPlaylist = cachedPlaylist,
+        )
+
+        requireNotNull(request)
+        assertEquals(88L, request.playlistId)
+        assertEquals(listOf(1L, 2L, 3L), request.tracks.map { it.id })
     }
 
     @Test

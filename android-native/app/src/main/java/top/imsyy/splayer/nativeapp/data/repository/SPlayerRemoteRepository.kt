@@ -51,6 +51,12 @@ data class QrCheckState(
     val cookieHeader: String = "",
 )
 
+data class LoginMutationResult(
+    val code: Int,
+    val body: String,
+    val cookieHeader: String = "",
+)
+
 internal class BoundedMemoryCache<K, V>(
     private val maxEntries: Int,
 ) {
@@ -204,69 +210,15 @@ class SPlayerRemoteRepository(
             "login/qr/check",
             mapOf("key" to key, "timestamp" to now()),
         )
+        val payload = response.obj("body").takeIf { it.isNotEmpty() } ?: response
         return QrCheckState(
-            code = response.int("code"),
-            cookieHeader = response.string("cookie"),
+            code = payload.int("code"),
+            cookieHeader = payload.string("cookie"),
         )
-    }
-
-    suspend fun refreshLogin(): LoginMutationResult {
-        return getNetease("login/refresh", mapOf("timestamp" to now())).toRemoteLoginMutationResult()
     }
 
     suspend fun logout(): LoginMutationResult {
         return getNetease("logout", mapOf("timestamp" to now())).toRemoteLoginMutationResult()
-    }
-
-    suspend fun sendCaptcha(phone: String, countryCode: String = "86"): LoginMutationResult {
-        return getNetease(
-            "captcha/sent",
-            mapOf(
-                "phone" to phone,
-                "ctcode" to countryCode,
-                "timestamp" to now(),
-            ),
-        ).toRemoteLoginMutationResult()
-    }
-
-    suspend fun verifyCaptcha(
-        phone: String,
-        captcha: String,
-        countryCode: String = "86",
-    ): LoginMutationResult {
-        return getNetease(
-            "captcha/verify",
-            mapOf(
-                "phone" to phone,
-                "captcha" to captcha,
-                "ctcode" to countryCode,
-                "timestamp" to now(),
-            ),
-        ).toRemoteLoginMutationResult()
-    }
-
-    suspend fun loginCellphone(
-        phone: String,
-        captcha: String? = null,
-        password: String? = null,
-        countryCode: String = "86",
-    ): LoginMutationResult {
-        val params = linkedMapOf(
-            "phone" to phone,
-            "ctcode" to countryCode,
-            "timestamp" to now(),
-        )
-        if (!captcha.isNullOrBlank()) {
-            params["captcha"] = captcha
-        } else {
-            require(!password.isNullOrBlank()) { "手机号登录需要验证码或密码" }
-            params["password"] = password
-        }
-        return getNetease("login/cellphone", params).toRemoteLoginMutationResult()
-    }
-
-    suspend fun fetchCountryCodeList(): String {
-        return getRaw("netease/countries/code/list", mapOf("timestamp" to now()))
     }
 
     suspend fun fetchPersonalizedPlaylists(limit: Int = 12): List<PlaylistItem> {

@@ -310,6 +310,64 @@ class PlaybackCoordinatorSupportTest {
     }
 
     @Test
+    fun `resolvePlaylistQueueExtension appends loaded tracks for same playlist and keeps current track index`() {
+        val currentQueue = listOf(sampleTrack(1), sampleTrack(2), sampleTrack(3))
+        val loadedTracks = currentQueue + listOf(sampleTrack(4), sampleTrack(5))
+
+        val result = resolvePlaylistQueueExtension(
+            activeSource = PlaybackQueueSource.Playlist(99L),
+            requestedPlaylistId = 99L,
+            currentQueue = currentQueue,
+            currentTrack = sampleTrack(2),
+            loadedTracks = loadedTracks,
+            playMode = PlayMode.SEQUENCE,
+            originalQueue = null,
+        )
+
+        requireNotNull(result)
+        assertEquals(listOf(1L, 2L, 3L, 4L, 5L), result.queue.map { it.id })
+        assertEquals(1, result.currentIndex)
+        assertNull(result.originalQueue)
+    }
+
+    @Test
+    fun `resolvePlaylistQueueExtension ignores pages from inactive playlist`() {
+        val result = resolvePlaylistQueueExtension(
+            activeSource = PlaybackQueueSource.Playlist(88L),
+            requestedPlaylistId = 99L,
+            currentQueue = listOf(sampleTrack(1), sampleTrack(2)),
+            currentTrack = sampleTrack(1),
+            loadedTracks = listOf(sampleTrack(1), sampleTrack(2), sampleTrack(3)),
+            playMode = PlayMode.SEQUENCE,
+            originalQueue = null,
+        )
+
+        assertNull(result)
+    }
+
+    @Test
+    fun `resolvePlaylistQueueExtension keeps shuffle visible order and expands original queue`() {
+        val originalQueue = listOf(sampleTrack(1), sampleTrack(2), sampleTrack(3))
+        val shuffledQueue = listOf(sampleTrack(2), sampleTrack(3), sampleTrack(1))
+        val loadedTracks = originalQueue + listOf(sampleTrack(4), sampleTrack(5))
+
+        val result = resolvePlaylistQueueExtension(
+            activeSource = PlaybackQueueSource.Playlist(99L),
+            requestedPlaylistId = 99L,
+            currentQueue = shuffledQueue,
+            currentTrack = sampleTrack(2),
+            loadedTracks = loadedTracks,
+            playMode = PlayMode.SHUFFLE,
+            originalQueue = originalQueue,
+        )
+
+        requireNotNull(result)
+        assertEquals(listOf(2L, 3L, 1L, 4L, 5L), result.queue.map { it.id })
+        assertEquals(0, result.currentIndex)
+        assertEquals(listOf(1L, 2L, 3L, 4L, 5L), result.originalQueue?.map { it.id })
+    }
+
+    @Test
     fun `previewPlayModeState changes visible mode without touching queue`() {
         val tracks = listOf(sampleTrack(1), sampleTrack(2), sampleTrack(3))
         val state = PlaybackUiState(

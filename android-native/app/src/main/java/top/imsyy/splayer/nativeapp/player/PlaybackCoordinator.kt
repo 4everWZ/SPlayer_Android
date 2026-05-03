@@ -45,6 +45,11 @@ data class PlaybackUiState(
     val errorMessage: String? = null,
 )
 
+sealed interface PlaybackQueueSource {
+    data object None : PlaybackQueueSource
+    data class Playlist(val playlistId: Long) : PlaybackQueueSource
+}
+
 data class MiniPlayerChromeState(
     val currentTrack: TrackItem? = null,
     val isPlaying: Boolean = false,
@@ -230,6 +235,12 @@ internal data class PlayModeQueueTransition(
     val originalQueue: List<TrackItem>?,
 )
 
+internal data class PlaylistQueueExtension(
+    val queue: List<TrackItem>,
+    val currentIndex: Int,
+    val originalQueue: List<TrackItem>?,
+)
+
 internal fun resolveNextPlayMode(current: PlayMode): PlayMode {
     return when (current) {
         PlayMode.SEQUENCE -> PlayMode.LIST_LOOP
@@ -323,6 +334,49 @@ internal fun resolvePlayModeQueueTransition(
     }
 }
 
+internal fun resolvePlaylistQueueExtension(
+    activeSource: PlaybackQueueSource,
+    requestedPlaylistId: Long,
+    currentQueue: List<TrackItem>,
+    currentTrack: TrackItem?,
+    loadedTracks: List<TrackItem>,
+    playMode: PlayMode,
+    originalQueue: List<TrackItem>?,
+): PlaylistQueueExtension? {
+    if (requestedPlaylistId <= 0L || loadedTracks.isEmpty()) return null
+    if (activeSource != PlaybackQueueSource.Playlist(requestedPlaylistId)) return null
+    val currentTrackId = currentTrack?.id ?: return null
+    val mergedOriginal = mergeQueueTracks(
+        existing = originalQueue?.takeIf { it.isNotEmpty() } ?: currentQueue,
+        incoming = loadedTracks,
+    )
+    if (mergedOriginal.size <= (originalQueue?.size ?: currentQueue.size)) return null
+    if (playMode == PlayMode.SHUFFLE) {
+        val extendedQueue = mergeQueueTracks(currentQueue, mergedOriginal)
+        val currentIndex = extendedQueue.indexOfFirst { it.id == currentTrackId }.takeIf { it >= 0 } ?: 0
+        return PlaylistQueueExtension(
+            queue = extendedQueue,
+            currentIndex = currentIndex,
+            originalQueue = mergedOriginal,
+        )
+    }
+    val currentIndex = mergedOriginal.indexOfFirst { it.id == currentTrackId }.takeIf { it >= 0 } ?: 0
+    return PlaylistQueueExtension(
+        queue = mergedOriginal,
+        currentIndex = currentIndex,
+        originalQueue = originalQueue,
+    )
+}
+
+private fun mergeQueueTracks(
+    existing: List<TrackItem>,
+    incoming: List<TrackItem>,
+): List<TrackItem> {
+    if (existing.isEmpty()) return incoming.distinctBy { it.id }
+    val existingIds = existing.map { it.id }.toMutableSet()
+    return existing + incoming.filter { track -> existingIds.add(track.id) }
+}
+
 @Singleton
 class PlaybackCoordinator @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -361,6 +415,7 @@ class PlaybackCoordinator @Inject constructor(
     private var lyricScreenProgressActive = false
     private var wordLevelLyricProgressActive = false
     private var originalQueueForMode: List<TrackItem>? = null
+    private var activeQueueSource: PlaybackQueueSource = PlaybackQueueSource.None
     private val stallTimeoutMs = 9_000L
 
     init {
@@ -494,6 +549,8 @@ class PlaybackCoordinator @Inject constructor(
         tracks: List<TrackItem>,
         startIndex: Int = 0,
         keepRequestedTrackFirstInShuffle: Boolean = true,
+        queueSource: PlaybackQueueSource = PlaybackQueueSource.None,
+        knownLoadedTracks: List<TrackItem>? = null,
     ) {
         if (tracks.isEmpty()) return
         val activePlayMode = resolveNewQueuePlayMode(_uiState.value.playMode)
@@ -512,8 +569,57 @@ class PlaybackCoordinator @Inject constructor(
         } else {
             null
         }
-        queueRepository.replaceQueue(queuePlan.tracks)
-        playTrack(queuePlan.tracks[queuePlan.startIndex], queuePlan.startIndex)
+        activeQueueSource = queueSource
+        var resolvedQueue = queuePlan.tracks
+        var resolvedStartIndex = queuePlan.startIndex
+        val playlistId = (queueSource as? PlaybackQueueSource.Playlist)?.playlistId
+        val knownExtension = if (playlistId != null && !knownLoadedTracks.isNullOrEmpty()) {
+            withContext(Dispatchers.Default) {
+                resolvePlaylistQueueExtension(
+                    activeSource = queueSource,
+                    requestedPlaylistId = playlistId,
+                    currentQueue = resolvedQueue,
+                    currentTrack = resolvedQueue[resolvedStartIndex],
+                    loadedTracks = knownLoadedTracks,
+                    playMode = activePlayMode,
+                    originalQueue = originalQueueForMode,
+                )
+            }
+        } else {
+            null
+        }
+        if (knownExtension != null) {
+            originalQueueForMode = knownExtension.originalQueue
+            resolvedQueue = knownExtension.queue
+            resolvedStartIndex = knownExtension.currentIndex
+        }
+        queueRepository.replaceQueue(resolvedQueue)
+        playTrack(resolvedQueue[resolvedStartIndex], resolvedStartIndex)
+    }
+
+    suspend fun updatePlaylistQueueIfActive(
+        playlistId: Long,
+        loadedTracks: List<TrackItem>,
+    ) {
+        val state = _uiState.value
+        val extension = withContext(Dispatchers.Default) {
+            resolvePlaylistQueueExtension(
+                activeSource = activeQueueSource,
+                requestedPlaylistId = playlistId,
+                currentQueue = state.queue,
+                currentTrack = state.currentTrack,
+                loadedTracks = loadedTracks,
+                playMode = state.playMode,
+                originalQueue = originalQueueForMode,
+            )
+        } ?: return
+        originalQueueForMode = extension.originalQueue
+        queueRepository.replaceQueue(extension.queue)
+        _uiState.value = _uiState.value.copy(
+            queue = extension.queue,
+            currentIndex = extension.currentIndex,
+            errorMessage = null,
+        )
     }
 
     suspend fun playTrack(track: TrackItem, queueIndex: Int? = null) {

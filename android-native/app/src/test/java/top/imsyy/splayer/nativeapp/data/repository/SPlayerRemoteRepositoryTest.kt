@@ -828,6 +828,31 @@ class SPlayerRemoteRepositoryTest {
     }
 
     @Test
+    fun `checkQrState reads nested body payload from wrapped response`() = runBlocking {
+        val repository = SPlayerRemoteRepository(
+            api = FakeApiService(
+                responses = mapOf(
+                    "netease/login/qr/check" to """
+                    {
+                      "code": 200,
+                      "body": {
+                        "code": 803,
+                        "message": "授权登录成功",
+                        "cookie": "MUSIC_U=wrapped_music_u; __csrf=wrapped_csrf;"
+                      }
+                    }
+                    """.trimIndent(),
+                ),
+            ),
+        )
+
+        val result = repository.checkQrState("test-key")
+
+        assertEquals(803, result.code)
+        assertEquals("MUSIC_U=wrapped_music_u; __csrf=wrapped_csrf;", result.cookieHeader)
+    }
+
+    @Test
     fun `fetchPlaylistDetail returns playlist meta and track list`() = runBlocking {
         val api = FakeApiService(
             responses = mapOf(

@@ -36,6 +36,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import top.imsyy.splayer.nativeapp.model.MyMusicPanelTab
 import top.imsyy.splayer.nativeapp.model.ThemeMode
+import top.imsyy.splayer.nativeapp.player.PlaybackQueueSource
 import top.imsyy.splayer.nativeapp.player.toMiniPlayerChromeState
 import top.imsyy.splayer.nativeapp.ui.components.MiniPlayerBar
 import top.imsyy.splayer.nativeapp.ui.navigation.DrawerEntry
@@ -243,6 +244,7 @@ fun SPlayerNativeApp() {
                         route = "${Routes.Playlist}/{${Routes.PlaylistIdArg}}",
                         arguments = listOf(navArgument(Routes.PlaylistIdArg) { defaultValue = "0" }),
                     ) {
+                        val playlistId = it.arguments?.getString(Routes.PlaylistIdArg)?.toLongOrNull() ?: 0L
                         PlaylistDetailScreen(
                             onBack = { navController.popBackStack() },
                             onPlayAll = { tracks ->
@@ -250,6 +252,7 @@ fun SPlayerNativeApp() {
                                     tracks = tracks,
                                     startIndex = 0,
                                     keepRequestedTrackFirstInShuffle = false,
+                                    queueSource = PlaybackQueueSource.Playlist(playlistId),
                                 )
                                 navController.navigate(Routes.Player)
                             },
@@ -258,7 +261,11 @@ fun SPlayerNativeApp() {
                             },
                             currentTrackId = miniPlayerState.currentTrack?.id,
                             onPlayTrack = { tracks, index ->
-                                playerViewModel.playTracks(tracks, index)
+                                playerViewModel.playTracks(
+                                    tracks = tracks,
+                                    startIndex = index,
+                                    queueSource = PlaybackQueueSource.Playlist(playlistId),
+                                )
                                 navController.navigate(Routes.Player)
                             },
                         )

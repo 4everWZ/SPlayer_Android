@@ -14,13 +14,13 @@ const cases = [
   },
   {
     name: "兼容新的 /splayer/netease",
-    actual: resolveApiRoot("", "http://192.9.181.26/splayer/netease"),
-    expected: "http://192.9.181.26/splayer",
+    actual: resolveApiRoot("", "https://example.com/splayer/netease"),
+    expected: "https://example.com/splayer",
   },
   {
     name: "优先使用 VITE_API_ROOT",
-    actual: resolveApiRoot("http://192.9.181.26/splayer", "http://legacy/api/netease"),
-    expected: "http://192.9.181.26/splayer",
+    actual: resolveApiRoot("https://example.com/splayer", "http://legacy/api/netease"),
+    expected: "https://example.com/splayer",
   },
 ];
 

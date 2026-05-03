@@ -4,9 +4,9 @@ import java.io.File
 import org.junit.Assert.assertFalse
 import org.junit.Test
 
-class NativeLoginResourceContractTest {
+class NativeUnlockResourceContractTest {
     @Test
-    fun `android native login source does not reference node or local server runtime`() {
+    fun `android native unlock source does not reference node or local server runtime`() {
         val sourceRoot = File("src/main/java/top/imsyy/splayer/nativeapp")
             .walkTopDown()
             .filter { file -> file.isFile && file.extension == "kt" }
@@ -17,5 +17,7 @@ class NativeLoginResourceContractTest {
         assertFalse(sourceRoot.contains("25884"))
         assertFalse(sourceRoot.contains("server/standalone"))
         assertFalse(sourceRoot.contains("VITE_SERVER_PORT"))
+        assertFalse(sourceRoot.contains("NeteaseLoginRepository"))
+        assertFalse(sourceRoot.contains("NativeNeteaseLoginClient"))
     }
 }

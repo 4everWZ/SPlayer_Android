@@ -26,6 +26,18 @@ class SettingsViewModelLoginTest {
         assertTrue(onCleared.contains("stopQrLogin()"))
     }
 
+    @Test
+    fun `settings login surface keeps qr login only`() {
+        val settingsScreen = File("src/main/java/top/imsyy/splayer/nativeapp/ui/screen/SettingsScreen.kt").readText()
+        val settingsViewModel = readSettingsViewModelSource()
+
+        assertFalse(settingsScreen.contains("手机号"))
+        assertFalse(settingsScreen.contains("验证码"))
+        assertFalse(settingsScreen.contains("国家码"))
+        assertFalse(settingsViewModel.contains("sendCaptcha"))
+        assertFalse(settingsViewModel.contains("loginWithCaptcha"))
+    }
+
     private fun readSettingsViewModelSource(): String {
         val source = File("src/main/java/top/imsyy/splayer/nativeapp/ui/ViewModels.kt").readText()
         return source.substringAfter("class SettingsViewModel")

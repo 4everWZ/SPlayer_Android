@@ -63,7 +63,7 @@
 
 1. 复制 `.env.example` 为 `.env.mobile`
 2. 执行 `pnpm install`
-3. 把 `VITE_API_ROOT` 改成你自己的服务根路径，例如 `http://192.9.181.26/splayer`
+3. 把 `VITE_API_ROOT` 改成你自己的服务根路径，例如 `https://example.com/splayer`
 4. 本地默认执行 `pnpm build:mobile:remote`
 5. 如需验证内置 runtime 入口，可执行 `pnpm build:mobile:embedded`
 6. 执行 `pnpm cap:sync`
