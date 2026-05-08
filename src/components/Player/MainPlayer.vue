@@ -9,7 +9,6 @@
         mobile: isSmallScreen,
       },
     ]"
-    @click="openFullPlayerFromBar"
   >
     <!-- 进度条 -->
     <PlayerSlider />
@@ -19,7 +18,6 @@
         'play-data',
         {
           'hidden-cover': settingStore.hiddenCovers.player,
-          clickable: isSmallScreen,
         },
       ]"
     >
@@ -29,7 +27,7 @@
           v-if="!settingStore.hiddenCovers.player"
           :key="musicStore.playSong.cover"
           class="cover"
-          @click.stop="openFullPlayerFromBar"
+          @click.stop="statusStore.showFullPlayer = true"
         >
           <n-image
             :src="musicStore.songCover"
@@ -147,15 +145,15 @@
     </div>
     <!-- 控制 -->
     <n-flex :size="8" align="center" justify="center" class="play-control" @click.stop>
-      <!-- 随机按钮 -->
+      <!-- 播放模式循环（左侧） -->
       <template
         v-if="musicStore.playSong.type !== 'radio' && !statusStore.personalFmMode && !isSmallScreen"
       >
-        <div class="play-icon mode-icon" @click.stop="player.toggleShuffle()">
+        <div class="play-icon mode-icon" @click.stop="player.cyclePlayMode()">
           <SvgIcon
             :name="statusStore.shuffleIcon"
             :size="20"
-            :depth="statusStore.shuffleMode === 'off' ? 3 : 1"
+            :depth="statusStore.playerModeKey === 'repeat-off' ? 3 : 1"
           />
         </div>
       </template>
@@ -210,18 +208,20 @@
       >
         <SvgIcon :size="26" name="SkipNext" />
       </div>
-      <!-- 循环按钮 -->
-      <template
-        v-if="musicStore.playSong.type !== 'radio' && !statusStore.personalFmMode && !isSmallScreen"
+      <!-- 桌面歌词开关（右侧） -->
+      <n-badge
+        v-if="isElectron && !isSmallScreen"
+        value="ON"
+        :show="statusStore.showDesktopLyric"
       >
-        <div class="play-icon mode-icon" @click.stop="player.toggleRepeat()">
+        <div class="play-icon mode-icon" @click.stop="player.toggleDesktopLyric()">
           <SvgIcon
-            :name="statusStore.repeatIcon"
+            name="DesktopLyric2"
             :size="20"
-            :depth="statusStore.repeatMode === 'off' ? 3 : 1"
+            :depth="statusStore.showDesktopLyric ? 1 : 3"
           />
         </div>
-      </template>
+      </n-badge>
     </n-flex>
     <!-- 功能 -->
     <Transition name="fade" mode="out-in">
@@ -297,6 +297,7 @@
 import { usePlayerController } from "@/core/player/PlayerController";
 import { useSongManager } from "@/core/player/SongManager";
 import { useMobile } from "@/composables/useMobile";
+import { isElectron } from "@/utils/env";
 import PlayerModePanel from "@/components/Player/PlayerModePanel.vue";
 import { useDataStore, useMusicStore, useSettingStore, useStatusStore } from "@/stores";
 import { toLikeSong } from "@/utils/auth";
@@ -336,9 +337,9 @@ const showSongMoreDrawer = computed({
 });
 
 const openFullPlayerFromBar = () => {
-  if (!isSmallScreen.value) return;
   statusStore.showFullPlayer = true;
 };
+
 
 const playerTitleText = computed(() => {
   const songName = settingStore.hideBracketedContent
@@ -588,9 +589,7 @@ const showCreatorTip = () => window.$message.info("暂不支持查看主播主�
     height: 100%;
     max-width: 640px;
     padding-left: 68px;
-    &.clickable {
-      cursor: pointer;
-    }
+    cursor: pointer;
     .cover {
       position: absolute;
       display: flex;
