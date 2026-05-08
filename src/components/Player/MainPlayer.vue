@@ -57,7 +57,7 @@
               :speed="0.2"
               class="name"
               style="cursor: pointer"
-              @click.stop="settingStore.hiddenCovers.player && openFullPlayerFromBar()"
+              @click.stop="statusStore.showFullPlayer = true"
             />
             <!-- 倍速 -->
             <n-tag
@@ -151,7 +151,7 @@
       >
         <div class="play-icon mode-icon" @click.stop="player.cyclePlayMode()">
           <SvgIcon
-            :name="statusStore.shuffleIcon"
+            :name="statusStore.playerModeIcon"
             :size="20"
             :depth="statusStore.playerModeKey === 'repeat-off' ? 3 : 1"
           />
@@ -335,10 +335,6 @@ const showSongMoreDrawer = computed({
     statusStore.playerSongMenuOpen = value;
   },
 });
-
-const openFullPlayerFromBar = () => {
-  statusStore.showFullPlayer = true;
-};
 
 
 const playerTitleText = computed(() => {
@@ -589,7 +585,6 @@ const showCreatorTip = () => window.$message.info("暂不支持查看主播主�
     height: 100%;
     max-width: 640px;
     padding-left: 68px;
-    cursor: pointer;
     .cover {
       position: absolute;
       display: flex;
@@ -771,6 +766,13 @@ const showCreatorTip = () => window.$message.info("暂不支持查看主播主�
       }
       &:active {
         transform: scale(1);
+      }
+    }
+    :deep(.n-badge-sup) {
+      background-color: rgba(var(--primary), 0.28);
+      backdrop-filter: blur(20px);
+      .n-base-slot-machine {
+        color: var(--primary-hex);
       }
     }
   }
