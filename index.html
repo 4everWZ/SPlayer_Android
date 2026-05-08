@@ -14,6 +14,13 @@
 
   <body>
     <div id="app"></div>
+    <script>
+      // 桌面歌词窗口立即透明，防止就绪前闪黑
+      if (location.hash.includes("desktop-lyric")) {
+        document.documentElement.style.background = "transparent";
+        document.body.style.background = "transparent";
+      }
+    </script>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
