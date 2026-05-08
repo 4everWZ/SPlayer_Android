@@ -87,8 +87,8 @@ export class PlayModeManager {
   public calculateNextShuffleMode(currentMode: ShuffleModeType): ShuffleModeType {
     if (currentMode === "off") return "on";
     if (currentMode === "on") return "off";
-    // 如果是心跳模式，点击随机按钮时退出心跳模式
-    if (currentMode === "heartbeat") return "off";
+    // 如果是心跳模式，点击随机按钮时退出心跳模式并激活随机播放
+    if (currentMode === "heartbeat") return "on";
     return "off";
   }
 

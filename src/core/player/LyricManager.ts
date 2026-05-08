@@ -742,6 +742,14 @@ class LyricManager {
     musicStore.setSongLyric(lyricData, true);
     // 结束加载状态
     statusStore.lyricLoading = false;
+    // 通知桌面歌词窗口取消加载状态（桌面歌词窗口监听的是 desktop-lyric:update-data 通道）
+    if (isElectron) {
+      window.electron.ipcRenderer.send("desktop-lyric:update-data", {
+        lyricLoading: false,
+        lrcData: lyricData.lrcData,
+        yrcData: lyricData.yrcData,
+      });
+    }
   }
 
   /**

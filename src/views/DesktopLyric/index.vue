@@ -190,13 +190,16 @@ let anchorTick = 0;
 const playSeekMs = ref<number>(0);
 
 // 每帧推进播放游标：播放中则以锚点加上经过的毫秒数推进，暂停则保持锚点
-const { pause: pauseSeek, resume: resumeSeek } = useRafFn(() => {
-  if (lyricData.playStatus) {
-    playSeekMs.value = baseMs + (performance.now() - anchorTick);
-  } else {
-    playSeekMs.value = baseMs;
-  }
-});
+const { pause: pauseSeek, resume: resumeSeek } = useRafFn(
+  () => {
+    if (lyricData.playStatus) {
+      playSeekMs.value = baseMs + (performance.now() - anchorTick);
+    } else {
+      playSeekMs.value = baseMs;
+    }
+  },
+  { fpsLimit: 60 },
+);
 
 // 300ms 提前量，用于补偿动画和感知延迟
 const LYRIC_LOOKAHEAD = 300;

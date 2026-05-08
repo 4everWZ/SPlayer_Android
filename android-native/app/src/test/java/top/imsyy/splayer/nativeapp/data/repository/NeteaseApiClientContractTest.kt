@@ -143,6 +143,15 @@ private class FakeNeteaseApiClient(
         return responses[path] ?: error("missing native response for $path")
     }
 
+    override suspend fun post(
+        path: String,
+        data: Map<String, String>,
+        params: Map<String, String>,
+    ): String {
+        calls += FakeNeteaseCall(path, params + data)
+        return responses[path] ?: error("missing native response for $path")
+    }
+
     override suspend fun canRequestOfficialApi(): Boolean = true
 }
 

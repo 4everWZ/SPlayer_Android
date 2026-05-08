@@ -162,6 +162,13 @@ class ViewModelSupportTest {
     }
 
     @Test
+    fun `resolvePlaylistInitialTrackForceRefresh follows mutation force refresh`() {
+        assertEquals(true, resolvePlaylistInitialTrackForceRefresh(cached = null, forceRefresh = false))
+        assertEquals(false, resolvePlaylistInitialTrackForceRefresh(cached = samplePlaylist(), forceRefresh = false))
+        assertEquals(true, resolvePlaylistInitialTrackForceRefresh(cached = samplePlaylist(), forceRefresh = true))
+    }
+
+    @Test
     fun `resolvePlaylistPlaybackRequest uses currently loaded tracks without waiting for hidden full list`() {
         val loadedTracks = (1L..80L).map(::sampleTrack)
         val clickedTrack = sampleTrack(id = 72L)
@@ -257,6 +264,19 @@ class ViewModelSupportTest {
             album = "测试专辑",
             coverUrl = "",
             durationMs = 180_000L,
+        )
+    }
+
+    private fun samplePlaylist(): PlaylistDetailUi {
+        return PlaylistDetailUi(
+            id = 88L,
+            name = "测试歌单",
+            coverUrl = "",
+            description = "",
+            playCount = 0L,
+            subscribedCount = 0L,
+            trackCount = 1,
+            tracks = listOf(sampleTrack(id = 1L)),
         )
     }
 }

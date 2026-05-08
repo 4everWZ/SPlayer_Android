@@ -101,6 +101,14 @@ internal fun shouldRunProgressLoop(
     return hasActiveSubscribers && isPlaying && !isBuffering
 }
 
+internal fun shouldKeepPlaybackServiceForeground(state: PlaybackUiState): Boolean {
+    return state.currentTrack != null || state.isPlaying || state.isBuffering
+}
+
+internal fun shouldReleasePlayerMediaResources(state: PlaybackUiState): Boolean {
+    return state.currentTrack == null && state.queue.isEmpty() && !state.isPlaying && !state.isBuffering
+}
+
 internal fun resolveProgressLoopIntervalMs(
     playerScreenActive: Boolean,
     lyricScreenActive: Boolean,
@@ -914,6 +922,38 @@ class PlaybackCoordinator @Inject constructor(
 
     fun reportError(message: String) {
         _uiState.value = _uiState.value.copy(errorMessage = message)
+    }
+
+    fun clearQueue() {
+        appScope.launch(Dispatchers.Main.immediate) {
+            stopProgressUpdates()
+            stopStallWatchdog()
+            playbackEndJob?.cancel()
+            playbackEndJob = null
+            withPlayer {
+                stop()
+                clearMediaItems()
+            }
+            originalQueueForMode = null
+            activeQueueSource = PlaybackQueueSource.None
+            retryCount = 0
+            lastStablePositionMs = 0L
+            lastPositionUpdateElapsed = SystemClock.elapsedRealtime()
+            lastPublishedPositionMs = 0L
+            lastPublishedDurationMs = 0L
+            _uiState.value = _uiState.value.copy(
+                queue = emptyList(),
+                currentTrack = null,
+                currentIndex = -1,
+                isPlaying = false,
+                isBuffering = false,
+                positionMs = 0L,
+                durationMs = 0L,
+                currentSource = null,
+                errorMessage = null,
+            )
+            queueRepository.clearQueue()
+        }
     }
 
     fun playQueueIndex(index: Int) {

@@ -37,6 +37,8 @@ import androidx.compose.material.icons.automirrored.rounded.NavigateBefore
 import androidx.compose.material.icons.automirrored.rounded.NavigateNext
 import androidx.compose.material.icons.automirrored.rounded.QueueMusic
 import androidx.compose.material.icons.rounded.ChatBubble
+import androidx.compose.material.icons.rounded.Favorite
+import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
@@ -205,10 +207,13 @@ fun PlayerScreen(
                         CoverStage(
                             track = track,
                             commentCount = screenState.totalCommentCount,
+                            currentTrackLiked = screenState.currentTrackLiked,
+                            likeLoading = screenState.likeLoading,
                             isPlaying = playbackState.isPlaying,
                             isBuffering = playbackState.isBuffering,
                             onOpenLyric = { lyricMode = true },
                             onOpenComments = viewModel::openCommentsSheet,
+                            onToggleLike = viewModel::toggleLikeCurrentTrack,
                         )
                     }
 
@@ -593,10 +598,13 @@ private fun LyricDisplayToggleChip(
 private fun CoverStage(
     track: TrackItem,
     commentCount: Int,
+    currentTrackLiked: Boolean,
+    likeLoading: Boolean,
     isPlaying: Boolean,
     isBuffering: Boolean,
     onOpenLyric: () -> Unit,
     onOpenComments: () -> Unit,
+    onToggleLike: () -> Unit,
 ) {
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val layout = remember(maxWidth, maxHeight) {
@@ -726,16 +734,42 @@ private fun CoverStage(
                         )
                     }
                     Row(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(999.dp))
-                            .clickable(onClick = onOpenComments)
-                            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.9f))
-                            .padding(horizontal = 14.dp, vertical = 9.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        Icon(Icons.Rounded.ChatBubble, contentDescription = null)
-                        Text("评论 ${commentCount.coerceAtLeast(0)}")
+                        IconButton(
+                            enabled = !likeLoading,
+                            onClick = onToggleLike,
+                            modifier = Modifier
+                                .size(46.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.9f)),
+                        ) {
+                            if (likeLoading) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(20.dp),
+                                    strokeWidth = 2.dp,
+                                )
+                            } else {
+                                Icon(
+                                    imageVector = if (currentTrackLiked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                                    contentDescription = if (currentTrackLiked) "取消喜欢" else "喜欢",
+                                    tint = if (currentTrackLiked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                )
+                            }
+                        }
+                        Row(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(999.dp))
+                                .clickable(onClick = onOpenComments)
+                                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.9f))
+                                .padding(horizontal = 14.dp, vertical = 9.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Icon(Icons.Rounded.ChatBubble, contentDescription = null)
+                            Text("评论 ${commentCount.coerceAtLeast(0)}")
+                        }
                     }
                 }
                 Text(

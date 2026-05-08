@@ -5,6 +5,9 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.take
+import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
 import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Assert.assertEquals
@@ -577,6 +580,94 @@ class SPlayerRemoteRepositoryTest {
         assertEquals(1001L, playlistId)
         val call = api.calls.first { it.url == "netease/user/playlist" }
         assertEquals("9001", call.params["uid"])
+    }
+
+    @Test
+    fun `fetchLikedSongIds reads likelist once and caches current account ids`() = runBlocking {
+        val api = FakeApiService(
+            responses = mapOf(
+                "netease/login/status" to """
+                {
+                  "data": {
+                    "account": { "id": 9001 },
+                    "profile": { "userId": 9001, "nickname": "原生用户" }
+                  }
+                }
+                """.trimIndent(),
+                "netease/user/account" to """
+                {
+                  "profile": { "userId": 9001, "nickname": "原生用户" }
+                }
+                """.trimIndent(),
+                "netease/likelist" to """{"ids":[11,12,13]}""",
+            ),
+        )
+        val repository = SPlayerRemoteRepository(api = api)
+
+        val first = repository.fetchLikedSongIds()
+        val second = repository.fetchLikedSongIds()
+
+        assertEquals(setOf(11L, 12L, 13L), first)
+        assertEquals(first, second)
+        assertEquals(1, api.calls.count { call -> call.url == "netease/likelist" })
+    }
+
+    @Test
+    fun `setSongLiked posts mutation updates cache and emits liked songs playlist event`() = runBlocking {
+        val api = FakeApiService(
+            responses = mapOf(
+                "netease/login/status" to """
+                {
+                  "data": {
+                    "account": { "id": 9001 },
+                    "profile": { "userId": 9001, "nickname": "原生用户" }
+                  }
+                }
+                """.trimIndent(),
+                "netease/user/account" to """
+                {
+                  "profile": { "userId": 9001, "nickname": "原生用户" }
+                }
+                """.trimIndent(),
+                "netease/likelist" to """{"ids":[11,12]}""",
+                "netease/user/playlist" to """
+                {
+                  "playlist": [
+                    {
+                      "id": 1001,
+                      "name": "我喜欢的音乐",
+                      "creator": { "userId": 9001 }
+                    }
+                  ]
+                }
+                """.trimIndent(),
+                "netease/like" to """{"code":200}""",
+            ),
+        )
+        val cacheDao = FakePlaylistDetailCacheDao().apply {
+            upsert(samplePlaylistCacheEntity(playlistId = 1001L))
+        }
+        val repository = SPlayerRemoteRepository(api = api, playlistDetailCacheDao = cacheDao)
+
+        repository.fetchLikedSongIds()
+        val eventsDeferred = async { repository.playlistMutationEvents.take(2).toList() }
+        repository.setSongLiked(songId = 13L, liked = true)
+        val events = eventsDeferred.await()
+
+        assertEquals(true, repository.isSongLiked(13L))
+        assertTrue(events[0] is PlaylistMutationEvent.LikedSongsChanged)
+        assertEquals(
+            PlaylistMutationEvent.PlaylistTracksChanged(
+                playlistId = 1001L,
+                trackIds = setOf(13L),
+            ),
+            events[1],
+        )
+        assertEquals(
+            listOf(mapOf("id" to "13", "like" to "true")),
+            api.posts.map { post -> post.data.filterKeys { key -> key in setOf("id", "like") } },
+        )
+        assertEquals(null, cacheDao.findById(1001L))
     }
 
     @Test
@@ -2097,6 +2188,7 @@ private class FakeApiService(
     private val responseDelayMillis: Map<String, Long> = emptyMap(),
 ) : SPlayerApiService {
     val calls = Collections.synchronizedList(mutableListOf<ApiCall>())
+    val posts = Collections.synchronizedList(mutableListOf<ApiPost>())
 
     override suspend fun get(url: String, params: Map<String, String>): okhttp3.ResponseBody {
         responseDelayMillis[url]?.takeIf { it > 0L }?.let { delay(it) }
@@ -2104,8 +2196,14 @@ private class FakeApiService(
         return (responses[url] ?: error("missing response for $url")).toResponseBody()
     }
 
-    override suspend fun post(url: String, data: Map<String, String>, params: Map<String, String>) =
-        error("unused")
+    override suspend fun post(
+        url: String,
+        data: Map<String, String>,
+        params: Map<String, String>,
+    ): okhttp3.ResponseBody {
+        posts += ApiPost(url = url, data = data, params = params)
+        return (responses[url] ?: error("missing response for $url")).toResponseBody()
+    }
 }
 
 private data class ApiCall(
@@ -2113,13 +2211,29 @@ private data class ApiCall(
     val params: Map<String, String>,
 )
 
+private data class ApiPost(
+    val url: String,
+    val data: Map<String, String>,
+    val params: Map<String, String>,
+)
+
 private class FakeRepositoryNeteaseApiClient(
     private val responses: Map<String, String>,
 ) : NeteaseApiClient {
     val calls = mutableListOf<NeteaseApiCall>()
+    val posts = mutableListOf<NeteasePostCall>()
 
     override suspend fun get(path: String, params: Map<String, String>): String {
         calls += NeteaseApiCall(path = path, params = params)
+        return responses[path] ?: error("missing netease response for $path")
+    }
+
+    override suspend fun post(
+        path: String,
+        data: Map<String, String>,
+        params: Map<String, String>,
+    ): String {
+        posts += NeteasePostCall(path = path, data = data, params = params)
         return responses[path] ?: error("missing netease response for $path")
     }
 
@@ -2128,6 +2242,12 @@ private class FakeRepositoryNeteaseApiClient(
 
 private data class NeteaseApiCall(
     val path: String,
+    val params: Map<String, String>,
+)
+
+private data class NeteasePostCall(
+    val path: String,
+    val data: Map<String, String>,
     val params: Map<String, String>,
 )
 
@@ -2224,4 +2344,22 @@ private class FakePlaylistDetailCacheDao : PlaylistDetailCacheDao {
     override suspend fun upsert(item: PlaylistDetailCacheEntity) {
         items[item.playlistId] = item
     }
+
+    override suspend fun deleteById(playlistId: Long) {
+        items.remove(playlistId)
+    }
+}
+
+private fun samplePlaylistCacheEntity(playlistId: Long): PlaylistDetailCacheEntity {
+    return PlaylistDetailCacheEntity(
+        playlistId = playlistId,
+        name = "缓存歌单",
+        coverUrl = "",
+        description = "",
+        playCount = 0L,
+        subscribedCount = 0L,
+        trackCount = 1,
+        tracksJson = "[]",
+        cachedAt = 1L,
+    )
 }

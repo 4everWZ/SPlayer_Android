@@ -8,6 +8,7 @@ import androidx.room.OnConflictStrategy
 import androidx.room.PrimaryKey
 import androidx.room.Query
 import androidx.room.RoomDatabase
+import androidx.room.Transaction
 import kotlinx.coroutines.flow.Flow
 
 @Entity(tableName = "playback_queue")
@@ -72,6 +73,12 @@ interface PlaybackQueueDao {
 
     @Query("DELETE FROM playback_queue")
     suspend fun clearQueue()
+
+    @Transaction
+    suspend fun replaceQueueTransaction(items: List<PlaybackQueueEntity>) {
+        clearQueue()
+        replaceQueue(items)
+    }
 }
 
 @Dao
@@ -123,6 +130,9 @@ interface PlaylistDetailCacheDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(item: PlaylistDetailCacheEntity)
+
+    @Query("DELETE FROM playlist_detail_cache WHERE playlistId = :playlistId")
+    suspend fun deleteById(playlistId: Long)
 }
 
 @Database(

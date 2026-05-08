@@ -31,6 +31,7 @@ import top.imsyy.splayer.nativeapp.data.local.AppSettingsStore
 import top.imsyy.splayer.nativeapp.data.local.configuredApiRoot
 import top.imsyy.splayer.nativeapp.data.local.configuredUnlockServerMode
 import top.imsyy.splayer.nativeapp.data.repository.LyricsPreferences
+import top.imsyy.splayer.nativeapp.data.repository.PlaylistMutationEvent
 import top.imsyy.splayer.nativeapp.data.repository.QueueRepository
 import top.imsyy.splayer.nativeapp.data.repository.SPlayerRemoteRepository
 import top.imsyy.splayer.nativeapp.model.AlbumDetailUi
@@ -441,6 +442,13 @@ class MyViewModel @Inject constructor(
             }
         }
         refresh()
+        viewModelScope.launch {
+            remoteRepository.playlistMutationEvents.collect { event ->
+                if (event is PlaylistMutationEvent.UserPlaylistLibraryChanged || event is PlaylistMutationEvent.LikedSongsChanged) {
+                    refresh(showLoading = false)
+                }
+            }
+        }
     }
 
     fun refresh(showLoading: Boolean = true) {
@@ -634,9 +642,21 @@ class PlaylistDetailViewModel @Inject constructor(
 
     init {
         refresh()
+        viewModelScope.launch {
+            remoteRepository.playlistMutationEvents.collect { event ->
+                val shouldRefresh = when (event) {
+                    is PlaylistMutationEvent.LikedSongsChanged -> _uiState.value.playlist?.id == remoteRepository.fetchLikedPlaylistId()
+                    is PlaylistMutationEvent.PlaylistTracksChanged -> event.playlistId == playlistId
+                    PlaylistMutationEvent.UserPlaylistLibraryChanged -> false
+                }
+                if (shouldRefresh) {
+                    refresh(forceRefresh = true)
+                }
+            }
+        }
     }
 
-    fun refresh() {
+    fun refresh(forceRefresh: Boolean = false) {
         if (playlistId <= 0L) {
             _uiState.value = PlaylistDetailUiState(
                 loading = false,
@@ -647,8 +667,12 @@ class PlaylistDetailViewModel @Inject constructor(
         fullPlaylistLoadJob?.cancel()
         viewModelScope.launch {
             supervisorScope {
-                val cached = remoteRepository.peekCachedPlaylistDetail(playlistId)
-                    ?: remoteRepository.readCachedPlaylistDetail(playlistId)
+                val cached = if (forceRefresh) {
+                    _uiState.value.playlist?.takeIf { playlist -> playlist.id == playlistId }
+                } else {
+                    remoteRepository.peekCachedPlaylistDetail(playlistId)
+                        ?: remoteRepository.readCachedPlaylistDetail(playlistId)
+                }
                 _uiState.value = if (cached == null) {
                     PlaylistDetailUiState(loading = true)
                 } else {
@@ -667,7 +691,10 @@ class PlaylistDetailViewModel @Inject constructor(
                     async {
                         remoteRepository.fetchPlaylistInitialTracks(
                             playlistId = playlistId,
-                            forceRefresh = cached == null,
+                            forceRefresh = resolvePlaylistInitialTrackForceRefresh(
+                                cached = cached,
+                                forceRefresh = forceRefresh,
+                            ),
                         )
                     }
                 } else {
@@ -676,7 +703,7 @@ class PlaylistDetailViewModel @Inject constructor(
                 runCatching {
                     remoteRepository.fetchPlaylistPreviewDetail(
                         playlistId = playlistId,
-                        forceRefresh = false,
+                        forceRefresh = forceRefresh,
                     )
                 }.onSuccess { playlist ->
                     _uiState.value = PlaylistDetailUiState(
@@ -956,6 +983,8 @@ data class PlayerScreenState(
     val showTranslation: Boolean = true,
     val showRomanized: Boolean = false,
     val lyricFontScale: Float = 1f,
+    val currentTrackLiked: Boolean = false,
+    val likeLoading: Boolean = false,
 )
 
 data class PlayerOverlayState(
@@ -978,6 +1007,7 @@ class PlayerViewModel @Inject constructor(
     val overlayState: StateFlow<PlayerOverlayState> = _overlayState.asStateFlow()
     private var commentsPrewarmJob: Job? = null
     private var lyricPrewarmJob: Job? = null
+    private var likeLoadJob: Job? = null
 
     init {
         viewModelScope.launch {
@@ -993,6 +1023,16 @@ class PlayerViewModel @Inject constructor(
         viewModelScope.launch {
             lyricsPreferences.lyricFontScale.collect { scale ->
                 _screenState.value = _screenState.value.copy(lyricFontScale = scale)
+            }
+        }
+        viewModelScope.launch {
+            remoteRepository.playlistMutationEvents.collect { event ->
+                if (event is PlaylistMutationEvent.LikedSongsChanged) {
+                    val track = playbackState.value.currentTrack
+                    if (track != null && (event.songIds.isEmpty() || track.id in event.songIds)) {
+                        refreshCurrentTrackLiked(track)
+                    }
+                }
             }
         }
     }
@@ -1071,6 +1111,37 @@ class PlayerViewModel @Inject constructor(
     fun setShowRomanized(enabled: Boolean) {
         viewModelScope.launch {
             lyricsPreferences.setShowRomanized(enabled)
+        }
+    }
+
+    fun toggleLikeCurrentTrack() {
+        val track = playbackState.value.currentTrack ?: return
+        if (_screenState.value.likeLoading) return
+        val targetLiked = !_screenState.value.currentTrackLiked
+        viewModelScope.launch {
+            _screenState.value = _screenState.value.copy(
+                currentTrackLiked = targetLiked,
+                likeLoading = true,
+            )
+            runCatching {
+                remoteRepository.setSongLiked(track.id, targetLiked)
+            }.onSuccess {
+                if (_screenState.value.activeTrackId == track.id) {
+                    _screenState.value = _screenState.value.copy(
+                        currentTrackLiked = targetLiked,
+                        likeLoading = false,
+                    )
+                }
+            }.onFailure { error ->
+                if (error is CancellationException) throw error
+                if (_screenState.value.activeTrackId == track.id) {
+                    _screenState.value = _screenState.value.copy(
+                        currentTrackLiked = !targetLiked,
+                        likeLoading = false,
+                    )
+                }
+                playbackCoordinator.reportError(sanitizeLoadErrorMessage(error.message, "更新喜欢状态失败"))
+            }
         }
     }
 
@@ -1155,7 +1226,10 @@ class PlayerViewModel @Inject constructor(
                 latestCommentPage = 1,
                 latestCommentHasMore = false,
                 commentTrackId = null,
+                currentTrackLiked = remoteRepository.isSongLiked(track.id),
+                likeLoading = false,
             )
+            refreshCurrentTrackLiked(track)
             prewarmComments(track)
             prewarmNextTrackLyrics(track)
             if (cachedLyrics.isNotEmpty()) {
@@ -1185,6 +1259,24 @@ class PlayerViewModel @Inject constructor(
                 return@launch
             }
             runCatching { remoteRepository.fetchLyrics(nextTrack) }
+        }
+    }
+
+    private fun refreshCurrentTrackLiked(track: TrackItem) {
+        likeLoadJob?.cancel()
+        likeLoadJob = viewModelScope.launch {
+            val liked = runCatching {
+                remoteRepository.fetchLikedSongIds().contains(track.id)
+            }.getOrElse { error ->
+                if (error is CancellationException) throw error
+                false
+            }
+            if (_screenState.value.activeTrackId == track.id) {
+                _screenState.value = _screenState.value.copy(
+                    currentTrackLiked = liked,
+                    likeLoading = false,
+                )
+            }
         }
     }
 
@@ -1351,6 +1443,7 @@ class PlayerViewModel @Inject constructor(
     override fun onCleared() {
         commentsPrewarmJob?.cancel()
         lyricPrewarmJob?.cancel()
+        likeLoadJob?.cancel()
         super.onCleared()
     }
 }
@@ -1399,6 +1492,13 @@ internal fun resolveMaxPlaylistPageRequests(
     val remaining = (trackCount - loadedTrackCount).coerceAtLeast(0)
     if (remaining == 0) return 0
     return ((remaining + pageSize - 1) / pageSize).coerceAtLeast(1) + 1
+}
+
+internal fun resolvePlaylistInitialTrackForceRefresh(
+    cached: PlaylistDetailUi?,
+    forceRefresh: Boolean,
+): Boolean {
+    return forceRefresh || cached == null
 }
 
 internal data class PlaylistPlaybackRequest(
@@ -1563,6 +1663,7 @@ class SettingsViewModel @Inject constructor(
     private val appSettingsStore: AppSettingsStore,
     private val lyricsPreferences: LyricsPreferences,
     private val queueRepository: QueueRepository,
+    private val playbackCoordinator: PlaybackCoordinator,
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(SettingsUiState(apiRoot = appSettingsStore.apiRoot))
     val uiState: StateFlow<SettingsUiState> = _uiState.asStateFlow()
@@ -1805,9 +1906,7 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun clearQueue() {
-        viewModelScope.launch {
-            queueRepository.clearQueue()
-        }
+        playbackCoordinator.clearQueue()
     }
 
     private suspend fun fetchLoginStateWithRetry(maxAttempts: Int = 5): UserAccountUi? {

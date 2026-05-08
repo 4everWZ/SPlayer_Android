@@ -696,6 +696,39 @@ class PlaybackCoordinatorSupportTest {
         assertTrue(resolveAudioFocusHandling(allowConcurrentPlayback = false))
         assertFalse(resolveAudioFocusHandling(allowConcurrentPlayback = true))
     }
+
+    @Test
+    fun `service foreground state is needed only for active or recoverable playback`() {
+        assertTrue(
+            shouldKeepPlaybackServiceForeground(
+                state = PlaybackUiState(currentTrack = sampleTrack(1), isPlaying = true),
+            ),
+        )
+        assertTrue(
+            shouldKeepPlaybackServiceForeground(
+                state = PlaybackUiState(currentTrack = sampleTrack(1), isPlaying = false),
+            ),
+        )
+        assertFalse(
+            shouldKeepPlaybackServiceForeground(
+                state = PlaybackUiState(queue = emptyList(), currentTrack = null, isPlaying = false),
+            ),
+        )
+    }
+
+    @Test
+    fun `empty idle playback state can release player media resources`() {
+        assertFalse(
+            shouldReleasePlayerMediaResources(
+                state = PlaybackUiState(currentTrack = sampleTrack(1), isPlaying = false),
+            ),
+        )
+        assertTrue(
+            shouldReleasePlayerMediaResources(
+                state = PlaybackUiState(queue = emptyList(), currentTrack = null, isPlaying = false),
+            ),
+        )
+    }
 }
 
 private fun sampleTrack(id: Long): TrackItem {

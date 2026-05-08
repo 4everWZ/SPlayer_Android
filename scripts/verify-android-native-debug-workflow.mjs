@@ -64,6 +64,14 @@ const requiredPatterns = [
     pattern:
       /tag_name="android-native-debug-\${GITHUB_RUN_ID}-\${GITHUB_RUN_ATTEMPT}-\${GITHUB_SHA::7}"/,
   },
+  {
+    description: "commit subject 正则先保存到变量，避免 bash 条件表达式解析括号失败",
+    pattern: "commit_subject_pattern='^([a-zA-Z]+)(\\([^)]*\\))?!?:[[:space:]]*(.*)$'",
+  },
+  {
+    description: "bash 正则匹配通过变量引用，避免未转义括号触发语法错误",
+    pattern: /\[\[ "\$line" =~ \$commit_subject_pattern \]\]/,
+  },
 ];
 
 const failures = requiredPatterns.filter(({ pattern }) => {

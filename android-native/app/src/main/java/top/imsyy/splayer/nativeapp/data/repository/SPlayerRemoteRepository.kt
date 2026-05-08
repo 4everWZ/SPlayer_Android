@@ -9,6 +9,9 @@ import kotlin.math.min
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.decodeFromString
@@ -59,6 +62,19 @@ data class LoginMutationResult(
     val cookieHeader: String = "",
 )
 
+sealed interface PlaylistMutationEvent {
+    data class PlaylistTracksChanged(
+        val playlistId: Long,
+        val trackIds: Set<Long> = emptySet(),
+    ) : PlaylistMutationEvent
+
+    data object UserPlaylistLibraryChanged : PlaylistMutationEvent
+
+    data class LikedSongsChanged(
+        val songIds: Set<Long> = emptySet(),
+    ) : PlaylistMutationEvent
+}
+
 internal class BoundedMemoryCache<K, V>(
     private val maxEntries: Int,
 ) {
@@ -78,6 +94,16 @@ internal class BoundedMemoryCache<K, V>(
 
     @Synchronized
     fun size(): Int = entries.size
+
+    @Synchronized
+    fun remove(key: K) {
+        entries.remove(key)
+    }
+
+    @Synchronized
+    fun removeAll(predicate: (K) -> Boolean) {
+        entries.keys.removeAll(predicate)
+    }
 }
 
 @Singleton
@@ -132,6 +158,18 @@ class SPlayerRemoteRepository(
 
     @Volatile
     private var searchHotCache: List<String>? = null
+    @Volatile
+    private var likedSongUserId: Long? = null
+
+    @Volatile
+    private var likedSongIdsCache: Set<Long>? = null
+    @Volatile
+    private var likedPlaylistUserId: Long? = null
+
+    @Volatile
+    private var likedPlaylistIdCache: Long? = null
+    private val mutationEvents = MutableSharedFlow<PlaylistMutationEvent>(extraBufferCapacity = 16)
+    val playlistMutationEvents: SharedFlow<PlaylistMutationEvent> = mutationEvents.asSharedFlow()
     private val json = Json {
         ignoreUnknownKeys = true
         isLenient = true
@@ -152,6 +190,53 @@ class SPlayerRemoteRepository(
 
     fun peekCachedLatestComments(songId: Long, pageNo: Int = 1, cursor: Long? = null): CommentPageResult? {
         return latestCommentCache[latestCommentCacheKey(songId, pageNo, cursor)]
+    }
+
+    fun isSongLiked(songId: Long): Boolean = likedSongIdsCache?.contains(songId) == true
+
+    suspend fun fetchLikedSongIds(forceRefresh: Boolean = false): Set<Long> {
+        val currentUser = fetchLoginState() ?: return emptySet()
+        val cachedIds = likedSongIdsCache
+        if (!forceRefresh && likedSongUserId == currentUser.userId && cachedIds != null) {
+            return cachedIds
+        }
+        return getNetease("likelist", mapOf("uid" to currentUser.userId.toString(), "timestamp" to now()))
+            .array("ids")
+            .mapNotNull { id -> id.longValueOrNull() }
+            .toSet()
+            .also { ids ->
+                likedSongUserId = currentUser.userId
+                likedSongIdsCache = ids
+            }
+    }
+
+    suspend fun setSongLiked(songId: Long, liked: Boolean) {
+        require(songId > 0L) { "歌曲参数无效" }
+        getNeteasePost(
+            "like",
+            data = mapOf(
+                "id" to songId.toString(),
+                "like" to liked.toString(),
+            ),
+            params = mapOf("timestamp" to now()),
+        )
+        val currentIds = likedSongIdsCache
+        if (currentIds != null) {
+            likedSongIdsCache = if (liked) currentIds + songId else currentIds - songId
+        }
+        val likedPlaylistId = runCatching { fetchLikedPlaylistId() }.getOrNull()
+        if (likedPlaylistId != null) {
+            invalidatePlaylistCaches(likedPlaylistId)
+        }
+        mutationEvents.emit(PlaylistMutationEvent.LikedSongsChanged(songIds = setOf(songId)))
+        if (likedPlaylistId != null) {
+            mutationEvents.emit(
+                PlaylistMutationEvent.PlaylistTracksChanged(
+                    playlistId = likedPlaylistId,
+                    trackIds = setOf(songId),
+                ),
+            )
+        }
     }
 
     suspend fun fetchPlaylistPreviewDetail(
@@ -344,6 +429,10 @@ class SPlayerRemoteRepository(
 
     suspend fun fetchLikedPlaylistId(): Long? {
         val currentUser = fetchLoginState() ?: return null
+        val cachedId = likedPlaylistIdCache
+        if (likedPlaylistUserId == currentUser.userId && cachedId != null) {
+            return cachedId
+        }
         val playlists = getNetease(
             "user/playlist",
             mapOf(
@@ -353,7 +442,10 @@ class SPlayerRemoteRepository(
                 "timestamp" to now(),
             ),
         ).array("playlist").mapNotNull { it.toPlaylistItem() }
-        return playlists.resolveLikedPlaylist(currentUser.userId)?.id
+        return playlists.resolveLikedPlaylist(currentUser.userId)?.id.also { playlistId ->
+            likedPlaylistUserId = currentUser.userId
+            likedPlaylistIdCache = playlistId
+        }
     }
 
     suspend fun fetchHeartRateTracks(
@@ -794,6 +886,15 @@ class SPlayerRemoteRepository(
         return parseJsonObjectBody(body)
     }
 
+    private suspend fun getNeteasePost(
+        path: String,
+        data: Map<String, String>,
+        params: Map<String, String> = emptyMap(),
+    ): JsonObject {
+        val body = neteaseApiClient.post(path, data, params)
+        return parseJsonObjectBody(body)
+    }
+
     private suspend fun requestPlaylistPayload(playlistId: Long): JsonObject {
         return getNetease(
             "playlist/detail",
@@ -867,6 +968,12 @@ class SPlayerRemoteRepository(
 
     private suspend fun persistPlaylistDetail(detail: PlaylistDetailUi) {
         playlistDetailCacheDao?.upsert(detail.toCacheEntity(json))
+    }
+
+    private suspend fun invalidatePlaylistCaches(playlistId: Long) {
+        playlistDetailCache.remove(playlistId)
+        playlistPageCache.removeAll { key -> key.startsWith("$playlistId:") }
+        playlistDetailCacheDao?.deleteById(playlistId)
     }
 
     private fun playlistPageCacheKey(
@@ -1779,6 +1886,8 @@ private fun JsonObject.obj(key: String): JsonObject = this[key] as? JsonObject ?
 private fun JsonObject.isTrialPreviewUrl(): Boolean = obj("freeTrialInfo").isNotEmpty()
 
 private fun JsonObject.array(key: String): List<JsonElement> = (this[key] as? JsonArray)?.toList().orEmpty()
+
+private fun JsonElement.longValueOrNull(): Long? = (this as? JsonPrimitive)?.longOrNull
 
 private fun JsonObject.string(key: String): String = (this[key] as? JsonPrimitive)?.contentOrNull.orEmpty()
 

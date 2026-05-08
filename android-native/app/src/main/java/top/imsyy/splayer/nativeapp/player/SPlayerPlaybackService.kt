@@ -9,13 +9,19 @@ import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.Player
-import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import androidx.media3.session.MediaStyleNotificationHelper
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import top.imsyy.splayer.nativeapp.MainActivity
 import top.imsyy.splayer.nativeapp.R
 
@@ -25,14 +31,17 @@ class SPlayerPlaybackService : MediaSessionService() {
     lateinit var playbackCoordinator: PlaybackCoordinator
 
     private var mediaSession: MediaSession? = null
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private var idleStopJob: Job? = null
+    private var hasEnteredForeground = false
 
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
         mediaSession = MediaSession.Builder(this, SystemMediaTransportPlayer(playbackCoordinator)).build()
         configureMediaNotificationProvider()
-        mediaSession?.let(::startPlaybackServiceForeground)
         playbackCoordinator.attachSessionService()
+        observeForegroundState()
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? {
@@ -41,6 +50,8 @@ class SPlayerPlaybackService : MediaSessionService() {
 
     override fun onDestroy() {
         stopForeground(STOP_FOREGROUND_REMOVE)
+        idleStopJob?.cancel()
+        serviceScope.cancel()
         mediaSession?.release()
         mediaSession = null
         playbackCoordinator.detachSessionService()
@@ -55,6 +66,33 @@ class SPlayerPlaybackService : MediaSessionService() {
             .build()
         provider.setSmallIcon(R.mipmap.ic_launcher)
         setMediaNotificationProvider(provider)
+    }
+
+    private fun observeForegroundState() {
+        serviceScope.launch {
+            playbackCoordinator.uiState.collect { state ->
+                val session = mediaSession ?: return@collect
+                if (shouldKeepPlaybackServiceForeground(state)) {
+                    idleStopJob?.cancel()
+                    startPlaybackServiceForeground(session)
+                } else if (shouldReleasePlayerMediaResources(state)) {
+                    scheduleIdleStop()
+                }
+            }
+        }
+    }
+
+    private fun scheduleIdleStop() {
+        if (idleStopJob?.isActive == true) return
+        idleStopJob = serviceScope.launch {
+            delay(IDLE_SERVICE_STOP_DELAY_MS)
+            if (shouldReleasePlayerMediaResources(playbackCoordinator.uiState.value)) {
+                if (hasEnteredForeground) {
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                }
+                stopSelf()
+            }
+        }
     }
 
     private fun startPlaybackServiceForeground(session: MediaSession) {
@@ -87,6 +125,7 @@ class SPlayerPlaybackService : MediaSessionService() {
         } else {
             startForeground(PLAYBACK_NOTIFICATION_ID, notification)
         }
+        hasEnteredForeground = true
     }
 
     private fun createNotificationChannel() {
@@ -106,10 +145,10 @@ class SPlayerPlaybackService : MediaSessionService() {
     companion object {
         private const val PLAYBACK_CHANNEL_ID = "splayer_native_playback"
         private const val PLAYBACK_NOTIFICATION_ID = 1001
+        private const val IDLE_SERVICE_STOP_DELAY_MS = 30_000L
     }
 }
 
-@OptIn(UnstableApi::class)
 private class SystemMediaTransportPlayer(
     private val playbackCoordinator: PlaybackCoordinator,
 ) : ForwardingPlayer(playbackCoordinator.player) {

@@ -74,10 +74,11 @@ jobs:
           fi
 
           rm -f changelog_*.md changelog_content.md
+          commit_subject_pattern='^([a-zA-Z]+)(\([^)]*\))?!?:[[:space:]]*(.*)$'
           while IFS= read -r line; do
             type="维护"
             body="- ${line}"
-            if [[ "$line" =~ ^([a-zA-Z]+)(\([^)]*\))?!?:[[:space:]]*(.*)$ ]]; then
+            if [[ "$line" =~ $commit_subject_pattern ]]; then
               raw_type="${BASH_REMATCH[1]}"
               body="- ${BASH_REMATCH[3]}"
               case "$raw_type" in

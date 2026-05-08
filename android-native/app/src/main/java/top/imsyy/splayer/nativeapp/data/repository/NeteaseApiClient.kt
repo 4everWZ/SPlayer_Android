@@ -65,10 +65,17 @@ internal val ANDROID_USED_NETEASE_PATHS = listOf(
     "comment/new",
     "playmode/intelligence/list",
     "song/url/v1",
+    "like",
 )
 
 interface NeteaseApiClient {
     suspend fun get(path: String, params: Map<String, String> = emptyMap()): String
+
+    suspend fun post(
+        path: String,
+        data: Map<String, String>,
+        params: Map<String, String> = emptyMap(),
+    ): String
 
     suspend fun canRequestOfficialApi(): Boolean
 }
@@ -82,6 +89,17 @@ class RemoteNeteaseApiClient(
         val url = resolveApiUrl("netease/$path")
         return withContext(Dispatchers.IO) {
             api.get(url, params).string()
+        }
+    }
+
+    override suspend fun post(
+        path: String,
+        data: Map<String, String>,
+        params: Map<String, String>,
+    ): String {
+        val url = resolveApiUrl("netease/$path")
+        return withContext(Dispatchers.IO) {
+            api.post(url, data, params).string()
         }
     }
 
@@ -102,6 +120,14 @@ class SwitchingNeteaseApiClient(
 ) : NeteaseApiClient {
     override suspend fun get(path: String, params: Map<String, String>): String {
         return activeClient().get(path, params)
+    }
+
+    override suspend fun post(
+        path: String,
+        data: Map<String, String>,
+        params: Map<String, String>,
+    ): String {
+        return activeClient().post(path, data, params)
     }
 
     override suspend fun canRequestOfficialApi(): Boolean = activeClient().canRequestOfficialApi()
@@ -133,6 +159,16 @@ class NativeNeteaseApiClient @Inject constructor(
             "lyric/ttml" -> fetchTtmlLyric(params)
             else -> requestEndpoint(endpoint, params)
         }
+    }
+
+    override suspend fun post(
+        path: String,
+        data: Map<String, String>,
+        params: Map<String, String>,
+    ): String {
+        val endpoint = NativeNeteaseEndpoint.fromRepositoryPath(path)
+            ?: error("本地 API 暂未覆盖 Netease endpoint: $path")
+        return requestEndpoint(endpoint, params + data)
     }
 
     override suspend fun canRequestOfficialApi(): Boolean = true
@@ -395,6 +431,14 @@ internal data class NativeNeteaseEndpoint(
                     put("encodeType", "flac")
                     if (p["level"] == "sky") put("immerseType", "c51")
                 }
+            },
+            endpoint("like", "/api/radio/like") { p ->
+                mapOf(
+                    "alg" to "itembased",
+                    "trackId" to p.required("id"),
+                    "like" to p.getOrDefault("like", "true"),
+                    "time" to "3",
+                )
             },
         )
         private val byPath = endpoints.associateBy { it.path }

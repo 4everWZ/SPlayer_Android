@@ -133,7 +133,7 @@ const syncPlaySeek = () => {
 };
 
 const { pause: pauseSeek, resume: resumeSeek } = useRafFn(syncPlaySeek, {
-  fpsLimit: isCapacitor ? (props.compact ? 18 : 20) : props.compact ? 24 : undefined,
+  fpsLimit: isCapacitor ? (props.compact ? 18 : 20) : props.compact ? 24 : 60,
 });
 
 /**

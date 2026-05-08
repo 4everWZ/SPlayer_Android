@@ -16,6 +16,7 @@ import top.imsyy.splayer.nativeapp.data.local.PlaybackSnapshotEntity
 import top.imsyy.splayer.nativeapp.data.local.RecentPlayDao
 import top.imsyy.splayer.nativeapp.data.local.RecentPlayEntity
 import top.imsyy.splayer.nativeapp.di.PLAYBACK_SNAPSHOT_CREATE_SQL
+import top.imsyy.splayer.nativeapp.model.TrackItem
 
 class QueueRepositoryTest {
     @Test
@@ -72,6 +73,46 @@ class QueueRepositoryTest {
     }
 
     @Test
+    fun `replaceQueue does not publish empty queue while swapping loaded playlist pages`() = runBlocking {
+        val queueDao = FakePlaybackQueueDao()
+        val repository = QueueRepository(
+            playbackQueueDao = queueDao,
+            recentPlayDao = FakeRecentPlayDao(),
+            failedSourceDao = FakeFailedSourceDao(),
+            playbackSnapshotDao = FakePlaybackSnapshotDao(),
+        )
+        queueDao.seedQueue(
+            listOf(
+                PlaybackQueueEntity(
+                    queueIndex = 0,
+                    songId = 1L,
+                    songName = "旧歌",
+                    artists = "旧歌手",
+                    album = "旧专辑",
+                    coverUrl = "",
+                    durationMs = 1_000L,
+                ),
+            ),
+        )
+        queueDao.clearRecordedQueues()
+
+        repository.replaceQueue(
+            listOf(
+                TrackItem(
+                    id = 2L,
+                    name = "新歌",
+                    artists = "新歌手",
+                    album = "新专辑",
+                    coverUrl = "",
+                    durationMs = 2_000L,
+                ),
+            ),
+        )
+
+        assertEquals(listOf(listOf(2L)), queueDao.recordedSongIds())
+    }
+
+    @Test
     fun `playback snapshot migration creates single row table without dropping existing tables`() {
         val sql = PLAYBACK_SNAPSHOT_CREATE_SQL
 
@@ -85,15 +126,35 @@ class QueueRepositoryTest {
 
 private class FakePlaybackQueueDao : PlaybackQueueDao {
     private val queue = MutableStateFlow<List<PlaybackQueueEntity>>(emptyList())
+    private val recordedQueues = mutableListOf<List<PlaybackQueueEntity>>()
 
     override fun observeQueue() = queue
 
     override suspend fun replaceQueue(items: List<PlaybackQueueEntity>) {
         queue.value = items
+        recordedQueues.add(items)
     }
 
     override suspend fun clearQueue() {
         queue.value = emptyList()
+        recordedQueues.add(emptyList())
+    }
+
+    override suspend fun replaceQueueTransaction(items: List<PlaybackQueueEntity>) {
+        queue.value = items
+        recordedQueues.add(items)
+    }
+
+    fun seedQueue(items: List<PlaybackQueueEntity>) {
+        queue.value = items
+    }
+
+    fun clearRecordedQueues() {
+        recordedQueues.clear()
+    }
+
+    fun recordedSongIds(): List<List<Long>> {
+        return recordedQueues.map { items -> items.map { it.songId } }
     }
 }
 

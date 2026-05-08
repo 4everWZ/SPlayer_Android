@@ -1724,7 +1724,11 @@ class PlayerController {
     }
 
     const currentIndex = modes.indexOf(statusStore.playerModeKey as PlayerModeKey);
-    const nextMode = modes[(currentIndex + 1 + modes.length) % modes.length];
+    // 心动模式取消后自动激活随机播放
+    const nextMode =
+      statusStore.playerModeKey === "heartbeat"
+        ? "shuffle"
+        : modes[(currentIndex + 1 + modes.length) % modes.length];
     await this.setPlayMode(nextMode);
   }
 

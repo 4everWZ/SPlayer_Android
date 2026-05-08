@@ -68,8 +68,7 @@ class QueueRepository @Inject constructor(
     }
 
     suspend fun replaceQueue(tracks: List<TrackItem>) {
-        playbackQueueDao.clearQueue()
-        playbackQueueDao.replaceQueue(
+        playbackQueueDao.replaceQueueTransaction(
             tracks.mapIndexed { index, track ->
                 PlaybackQueueEntity(
                     queueIndex = index,

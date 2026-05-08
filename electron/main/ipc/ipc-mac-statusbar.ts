@@ -20,7 +20,7 @@ let macLastLyricIndex = -1; // 上一次显示的歌词行索引
 let interpolationTimer: NodeJS.Timeout | null = null; // 插值计时器
 let macLastUpdateTime: number = 0; // 上次更新 macCurrentTime 的时间戳
 
-const LYRIC_UPDATE_INTERVAL = 50; // ms, 歌词更新频率
+const LYRIC_UPDATE_INTERVAL = 150; // ms, 歌词更新频率
 const PROGRESS_SYNC_THRESHOLD_MS = 100; // ms, 进度同步阈值，如果误差超过此值才同步
 
 /**
