@@ -1092,7 +1092,9 @@ onBeforeUnmount(() => {
 </style>
 
 <style>
-body {
+html,
+body,
+#app {
   background-color: transparent !important;
 }
 </style>
