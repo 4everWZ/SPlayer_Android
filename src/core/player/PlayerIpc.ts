@@ -206,9 +206,12 @@ export interface TaskbarProgressPayload {
  * 给任务栏实现平滑歌词滚动和进度条绘制使用
  * @param payload 包括当前秒、总长以及人工设置的偏移量
  */
-export const sendTaskbarProgressData = (payload: TaskbarProgressPayload) => {
-  broadcastTaskbarTick([payload.currentTime, payload.duration, payload.offset]);
-};
+export const sendTaskbarProgressData: (payload: TaskbarProgressPayload) => void = throttle(
+  (payload: TaskbarProgressPayload) => {
+    broadcastTaskbarTick([payload.currentTime, payload.duration, payload.offset]);
+  },
+  250,
+);
 
 /**
  * 同步主应用主题（明亮模式 / 暗色模式 的主基准色值）
@@ -228,9 +231,12 @@ export const sendTaskbarThemeColor = (color: { light: string; dark: string } | n
  * 发送高频进度数据给 macOS 的原生态 StatusBar (状态栏歌词)
  * @param payload 包括当前秒、总长以及时间偏移
  */
-export const sendMacStatusBarProgress = (payload: TaskbarProgressPayload) => {
-  if (isMac) sendIpc("mac-statusbar:update-progress", payload);
-};
+export const sendMacStatusBarProgress: (payload: TaskbarProgressPayload) => void = throttle(
+  (payload: TaskbarProgressPayload) => {
+    if (isMac) sendIpc("mac-statusbar:update-progress", payload);
+  },
+  250,
+);
 
 /**
  * 发送播放模式给托盘

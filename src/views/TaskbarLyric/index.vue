@@ -510,14 +510,21 @@ const updateLyric = () => {
   }
 };
 
+/** 降频到 ~15fps（66ms 间隔），歌词文本不需要 60fps 更新 */
+const FRAME_INTERVAL_MS = 66;
+let lastFrameTime = 0;
+
 const loop = (timestamp: number) => {
   if (!lastTimestamp) lastTimestamp = timestamp;
   const delta = timestamp - lastTimestamp;
+  lastTimestamp = timestamp;
   if (state.isPlaying) {
     state.currentTime += delta;
-    updateLyric();
+    if (timestamp - lastFrameTime >= FRAME_INTERVAL_MS) {
+      lastFrameTime = timestamp;
+      updateLyric();
+    }
   }
-  lastTimestamp = timestamp;
   rafId = requestAnimationFrame(loop);
 };
 

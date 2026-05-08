@@ -48,6 +48,20 @@ export default defineConfig({
         ],
       },
       {
+        text: "Android Native V2",
+        items: [
+          { text: "总览", link: "/specs/00_android_native_v2" },
+          { text: "API 规约", link: "/specs/dev_android_api" },
+          { text: "播放器规约", link: "/specs/dev_android_player" },
+          { text: "UI 规约", link: "/specs/dev_android_ui" },
+          { text: "实现矩阵", link: "/specs/matrix_android_native_v2" },
+          { text: "集成用例", link: "/specs/integration_android_native_v2" },
+          { text: "当前状态", link: "/specs/status_android_native_v2" },
+          { text: "架构设计", link: "/design/android_native_architecture" },
+          { text: "Tradeoffs", link: "/tradeoffs" },
+        ],
+      },
+      {
         text: "故障排查",
         items: [
           { text: "调试模式和错误排查", link: "/troubleshooting/debug" },

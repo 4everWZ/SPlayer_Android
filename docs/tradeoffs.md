@@ -65,3 +65,14 @@
 - 主题：Android unlock 默认使用原生按需解析
 - 原因：移动端不应为了默认播放链启动桌面端 Node/Electron 本地 unlock 服务，避免额外常驻进程和功耗
 - 影响：默认 `unlockServerMode=LOCAL` 通过 `NativeUnblockApiClient` 原生实现 desktop local 同款公开 provider，候选顺序与 REMOTE 的 `API_ROOT/unblock/*` 一致；APK 允许包含公开 provider URL，但仍不得包含用户私有 API Root、局域网 IP 或个人反代域名；失败音源记忆仍按当前模式过滤
+
+## AT-012
+
+- 主题：Desktop 播放期间高频循环降频
+- 原因：排查发现 desktop Electron 播放期间存在多处高频 IPC 和 RAF 循环，导致 CPU 唤醒频繁、笔记本续航下降
+- 影响：
+  - TaskbarLyric RAF 循环从 ~60fps 降频到 ~15fps（66ms 间隔），歌词文本不需要 60fps 更新
+  - `sendTaskbarProgressData` 和 `sendMacStatusBarProgress` 补齐 250ms throttle，与其他 IPC 节奏一致
+  - AMLL LyricPlayer RAF 保持 60fps（视觉动画需要），但通过 `disabled` prop 和组件卸载时自动停止
+  - Native Rust 模块（UIA watcher、Tray watcher、SMTC）均为事件驱动，无忙等
+  - 待后续真机验证：macOS 状态栏歌词 150ms 定时器、MPV time-pos 转发链路

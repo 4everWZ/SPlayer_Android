@@ -74,13 +74,25 @@
 - 本轮播放会话恢复已通过目标测试：`PlaybackCoordinatorSupportTest`、`QueueRepositoryTest`。
 - ADB 已由用户打开，但本轮尚未安装覆盖。
 
+## Desktop 高频功耗修复 (2026-05-08)
+
+已排查并修复 desktop Electron 播放期间的高频循环问题：
+
+1. **TaskbarLyric RAF 循环降频**：从 ~60fps 降到 ~15fps（66ms 间隔），歌词文本更新不需要 60fps
+2. **IPC 补齐 throttle**：`sendTaskbarProgressData` 和 `sendMacStatusBarProgress` 补齐 250ms throttle，与其他 IPC 节奏一致
+3. **VitePress 侧边栏对齐**：Android Native V2 规约、架构、tradeoffs 文档已加入侧边栏导航
+4. **Tradeoffs 文档更新**：新增 AT-012 记录 desktop 高频降频决策
+
+验证状态：`pnpm typecheck:web` 通过，`pnpm build` 编译成功。
+
 ## Recommended Next Steps
 
 1. 跑 `:app:testDebugUnitTest :app:assembleDebug`。
-2. 跑 `corepack pnpm lint`、`corepack pnpm build`、`corepack pnpm format`、`git diff --check --ignore-space-at-eol`。
+2. 跑 `corepack pnpm lint`、`corepack pnpm format`、`git diff --check --ignore-space-at-eol`。
 3. 检查源码和 APK 中不得出现用户私有 API 地址。
 4. ADB 覆盖安装、启动、logcat 崩溃检查；重点手测播放一首歌到中间，划掉重开后确认小播放条、唱片页、进度和播放模式恢复，且不会自动播放。
 5. 继续回归设置保存 API Root、二维码登录、推荐刷新、歌单分页播放队列补齐。
+6. macOS 真机验证：状态栏歌词 150ms 定时器功耗、MPV time-pos 转发链路频率。
 
 ## Key References
 
