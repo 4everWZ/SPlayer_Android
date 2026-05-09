@@ -202,9 +202,11 @@ export class PlayModeManager {
       if (!recList || recList.length === 0) {
         throw new Error("心动模式推荐列表为空");
       }
-      // 备份当前播放列表
-      const currentList = [...dataStore.playList];
-      await dataStore.setOriginalPlayList(currentList);
+      // 备份当前播放列表（仅首次进入时备份，重新触发时不覆盖已有的原始列表）
+      const existingOriginal = await dataStore.getOriginalPlayList();
+      if (!existingOriginal || existingOriginal.length === 0) {
+        await dataStore.setOriginalPlayList([...dataStore.playList]);
+      }
       if (signal.aborted) return;
       // 构建新的心动播放列表
       const currentSong = musicStore.playSong;

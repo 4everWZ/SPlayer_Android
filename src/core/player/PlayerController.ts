@@ -1371,6 +1371,31 @@ class PlayerController {
     const statusStore = useStatusStore();
     const musicStore = useMusicStore();
     if (!data || !data.length) return;
+    // 心动模式下同歌单切歌：不替换播放列表，直接从新歌曲重新拉取推荐
+    if (options.keepHeartbeatMode && statusStore.shuffleMode === "heartbeat") {
+      if (!song?.id) return;
+      const currentIdx = dataStore.playList.findIndex((s) => s.id === song.id);
+      if (currentIdx !== -1) {
+        statusStore.playIndex = currentIdx;
+        if (musicStore.playSong.id === song.id) {
+          if (options.play) await this.play();
+        } else {
+          statusStore.playLoading = true;
+          await this.playSong({ autoPlay: options.play });
+        }
+      } else {
+        // 歌曲不在当前心动列表中，先设为第一首再重新拉取
+        dataStore.playList.unshift({ ...song });
+        statusStore.playIndex = 0;
+        statusStore.playLoading = true;
+        await this.playSong({ autoPlay: options.play });
+      }
+      // 从新歌曲重新触发心动推荐
+      await this.toggleShuffle("heartbeat", { notify: false, force: true });
+      musicStore.playPlaylistId = pid ?? 0;
+      if (options.showTip) window.$message.success("已开始播放");
+      return;
+    }
     // 处理随机模式
     let processedData = [...data];
     if (statusStore.shuffleMode === "on") {
@@ -1380,7 +1405,7 @@ class PlayerController {
     // 更新列表
     await dataStore.setPlayList(processedData);
     // 关闭心动模式（不同歌单来源时）
-    if (!options.keepHeartbeatMode && statusStore.shuffleMode === "heartbeat") {
+    if (statusStore.shuffleMode === "heartbeat") {
       statusStore.shuffleMode = "off";
     }
     if (statusStore.personalFmMode) statusStore.personalFmMode = false;
@@ -1403,10 +1428,6 @@ class PlayerController {
       statusStore.playLoading = true;
       statusStore.playIndex = 0;
       await this.playSong({ autoPlay: options.play });
-    }
-    // 同歌单内切歌时，从新歌曲重新触发心动推荐
-    if (options.keepHeartbeatMode && statusStore.shuffleMode === "heartbeat") {
-      await this.toggleShuffle("heartbeat", { notify: false, force: true });
     }
     musicStore.playPlaylistId = pid ?? 0;
     if (options.showTip) window.$message.success("已开始播放");

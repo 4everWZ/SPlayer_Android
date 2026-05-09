@@ -83,8 +83,8 @@
 - 原因：`updatePlayList` 默认会重置心动模式（`keepHeartbeatMode` 未设置时 `shuffleMode` 从 `heartbeat` 回退到 `off`），导致用户在心动模式下双击列表内歌曲自动退回顺序播放。即使保留状态，播放列表也被原始数据覆盖，心动推荐列表丢失
 - 影响：
   - `SongList.vue` 双击播放时传入 `{ keepHeartbeatMode: true }`
+  - `updatePlayList` 在 `keepHeartbeatMode` 且心动模式激活时，走独立的 early return 路径：不替换播放列表，仅更新播放索引并从新歌曲重新拉取心动推荐，避免列表从 500 → 原始长度 → 500 的闪烁
   - `PlayModeManager.toggleShuffle` 新增 `force` 选项，允许相同模式下强制重新应用（重新拉取推荐列表）
-  - `PlayerController.toggleShuffle` 签名同步新增 `force` 透传
-  - `updatePlayList` 在 `keepHeartbeatMode` 且心动模式激活时，播歌完成后调用 `toggleShuffle("heartbeat", { notify: false, force: true })` 重新拉取推荐
+  - `PlayModeManager.applyHeartbeatMode` 仅在首次进入时备份 `originalPlayList`，重新触发时不覆盖已有的原始列表，确保退出心动模式时能恢复真正的原始歌单
   - 复用已有 `toggleShuffle` 而非新增独立方法，避免逻辑重复
   - 仅切换整个歌单来源（不同 pid）时才完全退出心动模式
