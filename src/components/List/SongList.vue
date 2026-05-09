@@ -353,7 +353,7 @@ const handleSongPlay = (song: SongType) => {
   if (props.doubleClickAction === "add") {
     player.addNextSong(song, true);
   } else {
-    player.updatePlayList(listData.value, song, props.playListId);
+    player.updatePlayList(listData.value, song, props.playListId, { keepHeartbeatMode: true });
   }
 };
 
