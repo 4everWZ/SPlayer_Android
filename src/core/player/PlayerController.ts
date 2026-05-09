@@ -1379,7 +1379,7 @@ class PlayerController {
     }
     // 更新列表
     await dataStore.setPlayList(processedData);
-    // 关闭心动模式
+    // 关闭心动模式（不同歌单来源时）
     if (!options.keepHeartbeatMode && statusStore.shuffleMode === "heartbeat") {
       statusStore.shuffleMode = "off";
     }
@@ -1403,6 +1403,10 @@ class PlayerController {
       statusStore.playLoading = true;
       statusStore.playIndex = 0;
       await this.playSong({ autoPlay: options.play });
+    }
+    // 同歌单内切歌时，从新歌曲重新触发心动推荐
+    if (options.keepHeartbeatMode && statusStore.shuffleMode === "heartbeat") {
+      await this.restartHeartbeatMode();
     }
     musicStore.playPlaylistId = pid ?? 0;
     if (options.showTip) window.$message.success("已开始播放");
@@ -1640,6 +1644,13 @@ class PlayerController {
    */
   public toggleRepeat(mode?: RepeatModeType, options?: { notify?: boolean }) {
     this.playModeManager.toggleRepeat(mode, options);
+  }
+
+  /**
+   * 从当前歌曲重新触发心动模式（重新拉取推荐列表）
+   */
+  public async restartHeartbeatMode() {
+    await this.playModeManager.restartHeartbeatMode();
   }
 
   /**

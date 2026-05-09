@@ -225,6 +225,17 @@ export class PlayModeManager {
   }
 
   /**
+   * 从当前歌曲重新触发心动模式（重新拉取推荐列表）
+   * 用于同歌单内切歌时保持心动模式活性
+   */
+  public async restartHeartbeatMode() {
+    const statusStore = useStatusStore();
+    if (statusStore.shuffleMode !== "heartbeat") return;
+    const signal = this.resetCurrentTask();
+    await this.applyHeartbeatMode(signal, "heartbeat", { notify: false });
+  }
+
+  /**
    * 执行关闭随机模式的操作
    *
    * 会恢复原始列表 和/或 清理推荐歌曲
