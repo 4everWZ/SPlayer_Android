@@ -80,11 +80,20 @@
 ## AT-013
 
 - 主题：心动模式在列表内切歌时保持并重新触发推荐
-- 原因：`updatePlayList` 默认会重置心动模式（`keepHeartbeatMode` 未设置时 `shuffleMode` 从 `heartbeat` 回退到 `off`），导致用户在心动模式下双击列表内歌曲自动退回顺序播放。即使保留状态，播放列表也被原始数据覆盖，心动推荐列表丢失
+- 原因：Web 端 `updatePlayList` 默认会重置心动模式，Android native 端 `PlaybackCoordinator.playTracks` 无条件调用 `resolveNewQueuePlayMode` 将 HEART 降级为 LIST_LOOP。两端均未区分"同歌单切歌"与"切换歌单"场景，导致心动模式下双击列表内歌曲自动退出心动模式
 - 影响：
-  - `SongList.vue` 双击播放时传入 `{ keepHeartbeatMode: true }`
-  - `updatePlayList` 在 `keepHeartbeatMode` 且心动模式激活时，走独立的 early return 路径：不替换播放列表，仅更新播放索引并从新歌曲重新拉取心动推荐，避免列表从 500 → 原始长度 → 500 的闪烁
-  - `PlayModeManager.toggleShuffle` 新增 `force` 选项，允许相同模式下强制重新应用（重新拉取推荐列表）
-  - `PlayModeManager.applyHeartbeatMode` 仅在首次进入时备份 `originalPlayList`，重新触发时不覆盖已有的原始列表，确保退出心动模式时能恢复真正的原始歌单
-  - 复用已有 `toggleShuffle` 而非新增独立方法，避免逻辑重复
-  - 仅切换整个歌单来源（不同 pid）时才完全退出心动模式
+  - **Web 端**：
+    - `SongList.vue` 双击播放时传入 `{ keepHeartbeatMode: true }`
+    - `updatePlayList` 在 `keepHeartbeatMode` 且心动模式激活时，走独立的 early return 路径：不替换播放列表，仅更新播放索引并从新歌曲重新拉取心动推荐
+    - `PlayModeManager.toggleShuffle` 新增 `force` 选项，允许相同模式下强制重新应用
+    - `PlayModeManager.applyHeartbeatMode` 仅在首次进入时备份 `originalPlayList`，重新触发时不覆盖
+  - **Android native 端**：
+    - 新增纯函数 `resolveShouldKeepHeartbeatMode`：检测当前模式为 HEART 且 `activeQueueSource` 与 `requestedSource` 指向同一歌单
+    - `PlaybackCoordinator.playTracks` 新增 `heartTracks` 参数，同歌单切歌时跳过 `resolveNewQueuePlayMode` 降级，直接播放点击歌曲后调用 `setPlayMode(HEART, heartTracks)` 重建推荐队列
+    - `PlayerViewModel.playTracks` 在心动模式同歌单场景下预加载 `heartTracks`，传递给 Coordinator
+    - `PlaybackCoordinator.currentQueueSource` 暴露当前队列来源供 ViewModel 检测
+  - **行为对齐**（网易云音乐）：
+    - 心动模式 + 同歌单点击 → 保持心动，从新歌曲重新拉取推荐
+    - 心动模式 + 不同歌单点击 → 退出到列表循环
+    - 随机模式 + 同歌单点击 → 保持随机，重新打乱
+    - 随机模式 + 不同歌单点击 → 保持随机，新歌单打乱

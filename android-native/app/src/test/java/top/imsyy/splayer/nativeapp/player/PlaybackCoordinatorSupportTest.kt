@@ -303,6 +303,57 @@ class PlaybackCoordinatorSupportTest {
     }
 
     @Test
+    fun `resolveShouldKeepHeartbeatMode preserves heartbeat for same playlist`() {
+        assertTrue(
+            resolveShouldKeepHeartbeatMode(
+                currentMode = PlayMode.HEART,
+                activeSource = PlaybackQueueSource.Playlist(42L),
+                requestedSource = PlaybackQueueSource.Playlist(42L),
+            ),
+        )
+    }
+
+    @Test
+    fun `resolveShouldKeepHeartbeatMode drops heartbeat for different playlist`() {
+        assertFalse(
+            resolveShouldKeepHeartbeatMode(
+                currentMode = PlayMode.HEART,
+                activeSource = PlaybackQueueSource.Playlist(42L),
+                requestedSource = PlaybackQueueSource.Playlist(99L),
+            ),
+        )
+    }
+
+    @Test
+    fun `resolveShouldKeepHeartbeatMode drops heartbeat for non-playlist source`() {
+        assertFalse(
+            resolveShouldKeepHeartbeatMode(
+                currentMode = PlayMode.HEART,
+                activeSource = PlaybackQueueSource.Playlist(42L),
+                requestedSource = PlaybackQueueSource.None,
+            ),
+        )
+    }
+
+    @Test
+    fun `resolveShouldKeepHeartbeatMode ignores non-heartbeat modes`() {
+        assertFalse(
+            resolveShouldKeepHeartbeatMode(
+                currentMode = PlayMode.SHUFFLE,
+                activeSource = PlaybackQueueSource.Playlist(42L),
+                requestedSource = PlaybackQueueSource.Playlist(42L),
+            ),
+        )
+        assertFalse(
+            resolveShouldKeepHeartbeatMode(
+                currentMode = PlayMode.LIST_LOOP,
+                activeSource = PlaybackQueueSource.Playlist(42L),
+                requestedSource = PlaybackQueueSource.Playlist(42L),
+            ),
+        )
+    }
+
+    @Test
     fun `resolvePlaylistQueueExtension appends loaded tracks for same playlist and keeps current track index`() {
         val currentQueue = listOf(sampleTrack(1), sampleTrack(2), sampleTrack(3))
         val loadedTracks = currentQueue + listOf(sampleTrack(4), sampleTrack(5))

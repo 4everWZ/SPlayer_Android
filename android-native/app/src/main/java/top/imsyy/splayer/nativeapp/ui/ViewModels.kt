@@ -57,6 +57,7 @@ import top.imsyy.splayer.nativeapp.model.UserAccountUi
 import top.imsyy.splayer.nativeapp.player.PlaybackCoordinator
 import top.imsyy.splayer.nativeapp.player.PlaybackQueueSource
 import top.imsyy.splayer.nativeapp.player.resolveNextPlayMode
+import top.imsyy.splayer.nativeapp.player.resolveShouldKeepHeartbeatMode
 import top.imsyy.splayer.nativeapp.ui.navigation.Routes
 import android.content.Context
 
@@ -1068,8 +1069,8 @@ class PlayerViewModel @Inject constructor(
         wordLevelLyricActive = wordLevelLyricActive,
     )
 
-    private suspend fun loadHeartRateTracksForCurrent(): List<TrackItem>? {
-        val currentTrack = playbackState.value.currentTrack
+    private suspend fun loadHeartRateTracksForCurrent(seedTrack: TrackItem? = null): List<TrackItem>? {
+        val currentTrack = seedTrack ?: playbackState.value.currentTrack
         if (currentTrack == null || currentTrack.id <= 0L) {
             playbackCoordinator.reportError("请先播放一首歌曲后再开启心动模式")
             return null
@@ -1159,6 +1160,17 @@ class PlayerViewModel @Inject constructor(
     ) {
         if (tracks.isEmpty()) return
         viewModelScope.launch {
+            // 心动模式下同歌单切歌：预加载推荐列表
+            val isHeartbeatSamePlaylist = resolveShouldKeepHeartbeatMode(
+                playbackState.value.playMode,
+                playbackCoordinator.currentQueueSource,
+                queueSource,
+            )
+            val heartTracks = if (isHeartbeatSamePlaylist) {
+                loadHeartRateTracksForCurrent(tracks[startIndex.coerceIn(0, tracks.lastIndex)])
+            } else {
+                null
+            }
             val syncRequest = resolvePlaylistQueueSyncRequest(
                 queueSource = queueSource,
                 cachedPlaylist = (queueSource as? PlaybackQueueSource.Playlist)
@@ -1170,6 +1182,7 @@ class PlayerViewModel @Inject constructor(
                 keepRequestedTrackFirstInShuffle = keepRequestedTrackFirstInShuffle,
                 queueSource = queueSource,
                 knownLoadedTracks = syncRequest?.tracks,
+                heartTracks = heartTracks,
             )
             if (syncRequest != null) {
                 playbackCoordinator.updatePlaylistQueueIfActive(syncRequest.playlistId, syncRequest.tracks)

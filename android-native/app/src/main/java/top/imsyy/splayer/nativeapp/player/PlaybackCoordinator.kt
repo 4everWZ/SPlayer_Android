@@ -387,6 +387,22 @@ internal fun resolveNewQueuePlayMode(current: PlayMode): PlayMode {
     return if (current == PlayMode.HEART) PlayMode.LIST_LOOP else current
 }
 
+/**
+ * 判断是否应保持心动模式（同歌单内切歌）
+ * 对齐网易云音乐：心动模式下点击同歌单歌曲 → 保持心动，从新歌曲重新拉取推荐
+ */
+internal fun resolveShouldKeepHeartbeatMode(
+    currentMode: PlayMode,
+    activeSource: PlaybackQueueSource,
+    requestedSource: PlaybackQueueSource,
+): Boolean {
+    if (currentMode != PlayMode.HEART) return false
+    if (activeSource is PlaybackQueueSource.Playlist && requestedSource is PlaybackQueueSource.Playlist) {
+        return activeSource.playlistId == requestedSource.playlistId
+    }
+    return false
+}
+
 internal fun previewPlayModeState(
     state: PlaybackUiState,
     targetMode: PlayMode,
@@ -548,6 +564,7 @@ class PlaybackCoordinator @Inject constructor(
     private var wordLevelLyricProgressActive = false
     private var originalQueueForMode: List<TrackItem>? = null
     private var activeQueueSource: PlaybackQueueSource = PlaybackQueueSource.None
+    val currentQueueSource: PlaybackQueueSource get() = activeQueueSource
     private var handleAudioFocus: Boolean? = null
     private var restoreSnapshotApplied = false
     private var lastSavedSnapshotElapsed = 0L
@@ -737,8 +754,26 @@ class PlaybackCoordinator @Inject constructor(
         keepRequestedTrackFirstInShuffle: Boolean = true,
         queueSource: PlaybackQueueSource = PlaybackQueueSource.None,
         knownLoadedTracks: List<TrackItem>? = null,
+        heartTracks: List<TrackItem>? = null,
     ) {
         if (tracks.isEmpty()) return
+        // 心动模式下同歌单切歌：保持心动模式，从新歌曲重新拉取推荐
+        if (resolveShouldKeepHeartbeatMode(_uiState.value.playMode, activeQueueSource, queueSource)
+            && heartTracks != null
+        ) {
+            val clickedTrack = tracks[startIndex.coerceIn(0, tracks.lastIndex)]
+            val existingIndex = _uiState.value.queue.indexOfFirst { it.id == clickedTrack.id }
+            if (existingIndex >= 0) {
+                queueRepository.replaceQueue(_uiState.value.queue)
+                playTrack(_uiState.value.queue[existingIndex], existingIndex)
+            } else {
+                val newQueue = listOf(clickedTrack) + _uiState.value.queue
+                queueRepository.replaceQueue(newQueue)
+                playTrack(clickedTrack, 0)
+            }
+            setPlayMode(PlayMode.HEART, listOf(clickedTrack) + heartTracks.filterNot { it.id == clickedTrack.id })
+            return
+        }
         val activePlayMode = resolveNewQueuePlayMode(_uiState.value.playMode)
         val queuePlan = resolvePlaybackQueuePlan(
             tracks = tracks,
