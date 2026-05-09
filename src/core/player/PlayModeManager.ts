@@ -13,6 +13,8 @@ import * as playerIpc from "./PlayerIpc";
 
 interface PlayModeChangeOptions {
   notify?: boolean;
+  /** 强制重新应用当前模式（用于心动模式切歌后重新拉取推荐） */
+  force?: boolean;
 }
 
 /**
@@ -225,17 +227,6 @@ export class PlayModeManager {
   }
 
   /**
-   * 从当前歌曲重新触发心动模式（重新拉取推荐列表）
-   * 用于同歌单内切歌时保持心动模式活性
-   */
-  public async restartHeartbeatMode() {
-    const statusStore = useStatusStore();
-    if (statusStore.shuffleMode !== "heartbeat") return;
-    const signal = this.resetCurrentTask();
-    await this.applyHeartbeatMode(signal, "heartbeat", { notify: false });
-  }
-
-  /**
    * 执行关闭随机模式的操作
    *
    * 会恢复原始列表 和/或 清理推荐歌曲
@@ -275,7 +266,7 @@ export class PlayModeManager {
     const nextMode = mode;
     const currentMode = statusStore.shuffleMode;
 
-    if (nextMode === currentMode) return;
+    if (nextMode === currentMode && !options.force) return;
 
     const previousMode = statusStore.shuffleMode;
     statusStore.shuffleMode = nextMode;

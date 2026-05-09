@@ -1406,7 +1406,7 @@ class PlayerController {
     }
     // 同歌单内切歌时，从新歌曲重新触发心动推荐
     if (options.keepHeartbeatMode && statusStore.shuffleMode === "heartbeat") {
-      await this.restartHeartbeatMode();
+      await this.toggleShuffle("heartbeat", { notify: false, force: true });
     }
     musicStore.playPlaylistId = pid ?? 0;
     if (options.showTip) window.$message.success("已开始播放");
@@ -1647,25 +1647,18 @@ class PlayerController {
   }
 
   /**
-   * 从当前歌曲重新触发心动模式（重新拉取推荐列表）
-   */
-  public async restartHeartbeatMode() {
-    await this.playModeManager.restartHeartbeatMode();
-  }
-
-  /**
    * 切换随机模式
    * @param mode 可选，直接设置目标模式。如果不传则按 Off -> On -> Off 顺序轮转
    * @note 心跳模式只能通过菜单开启（传入 "heartbeat" 参数），点击随机按钮不会进入心跳模式
    * @note 当播放列表包含本地歌曲时，跳过心动模式，只在 Off 和 On 之间切换
    */
-  public async toggleShuffle(mode?: ShuffleModeType, options?: { notify?: boolean }) {
+  public async toggleShuffle(mode?: ShuffleModeType, options?: { notify?: boolean; force?: boolean }) {
     const statusStore = useStatusStore();
     const currentMode = statusStore.shuffleMode;
     // 预判下一个模式
     const nextMode = mode ?? this.playModeManager.calculateNextShuffleMode(currentMode);
-    // 如果模式确实改变了，才让 Manager 进行繁重的数据处理
-    if (currentMode !== nextMode) {
+    // 如果模式确实改变了（或强制刷新），才让 Manager 进行繁重的数据处理
+    if (currentMode !== nextMode || options?.force) {
       await this.playModeManager.toggleShuffle(nextMode, options);
     }
   }
