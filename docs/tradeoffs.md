@@ -79,6 +79,10 @@
 
 ## AT-013
 
-- 主题：心动模式在列表内切歌时保持
-- 原因：`updatePlayList` 默认会重置心动模式（`keepHeartbeatMode` 未设置时 `shuffleMode` 从 `heartbeat` 回退到 `off`），导致用户在心动模式下双击列表内歌曲自动退回顺序播放
-- 影响：`SongList.vue` 双击播放时传入 `{ keepHeartbeatMode: true }`，仅切换整个歌单来源时才重置心动模式；播放模式循环按钮使用 `cyclePlayMode()` 统一处理所有模式（repeat-off → repeat-list → repeat-one → shuffle → heartbeat）
+- 主题：心动模式在列表内切歌时保持并重新触发推荐
+- 原因：`updatePlayList` 默认会重置心动模式（`keepHeartbeatMode` 未设置时 `shuffleMode` 从 `heartbeat` 回退到 `off`），导致用户在心动模式下双击列表内歌曲自动退回顺序播放。即使保留状态，播放列表也被原始数据覆盖，心动推荐列表丢失
+- 影响：
+  - `SongList.vue` 双击播放时传入 `{ keepHeartbeatMode: true }`
+  - `PlayModeManager` 新增 `restartHeartbeatMode()` 公开方法，从当前歌曲重新拉取心动推荐列表
+  - `updatePlayList` 在 `keepHeartbeatMode` 且心动模式激活时，播歌完成后自动调用 `restartHeartbeatMode()`
+  - 仅切换整个歌单来源（不同 pid）时才完全退出心动模式
