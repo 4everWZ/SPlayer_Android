@@ -76,3 +76,9 @@
   - AMLL LyricPlayer RAF 保持 60fps（视觉动画需要），但通过 `disabled` prop 和组件卸载时自动停止
   - Native Rust 模块（UIA watcher、Tray watcher、SMTC）均为事件驱动，无忙等
   - 待后续真机验证：macOS 状态栏歌词 150ms 定时器、MPV time-pos 转发链路
+
+## AT-013
+
+- 主题：心动模式在列表内切歌时保持
+- 原因：`updatePlayList` 默认会重置心动模式（`keepHeartbeatMode` 未设置时 `shuffleMode` 从 `heartbeat` 回退到 `off`），导致用户在心动模式下双击列表内歌曲自动退回顺序播放
+- 影响：`SongList.vue` 双击播放时传入 `{ keepHeartbeatMode: true }`，仅切换整个歌单来源时才重置心动模式；播放模式循环按钮使用 `cyclePlayMode()` 统一处理所有模式（repeat-off → repeat-list → repeat-one → shuffle → heartbeat）
