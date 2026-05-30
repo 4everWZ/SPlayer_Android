@@ -209,17 +209,9 @@
         <SvgIcon :size="26" name="SkipNext" />
       </div>
       <!-- 桌面歌词开关（右侧） -->
-      <n-badge
-        v-if="isElectron && !isSmallScreen"
-        value="ON"
-        :show="statusStore.showDesktopLyric"
-      >
+      <n-badge v-if="isElectron && !isSmallScreen" value="ON" :show="statusStore.showDesktopLyric">
         <div class="play-icon mode-icon" @click.stop="player.toggleDesktopLyric()">
-          <SvgIcon
-            name="DesktopLyric2"
-            :size="20"
-            :depth="statusStore.showDesktopLyric ? 1 : 3"
-          />
+          <SvgIcon name="DesktopLyric2" :size="20" :depth="statusStore.showDesktopLyric ? 1 : 3" />
         </div>
       </n-badge>
     </n-flex>
@@ -335,7 +327,6 @@ const showSongMoreDrawer = computed({
     statusStore.playerSongMenuOpen = value;
   },
 });
-
 
 const playerTitleText = computed(() => {
   const songName = settingStore.hideBracketedContent

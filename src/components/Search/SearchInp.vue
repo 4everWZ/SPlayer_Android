@@ -1,5 +1,5 @@
 <template>
-  <div :class="['search', { focus: statusStore.searchFocus }]">
+  <div ref="searchContainerRef" :class="['search', { focus: statusStore.searchFocus }]">
     <!-- 搜索框 -->
     <n-input
       ref="searchInputRef"
@@ -12,6 +12,7 @@
       clearable
       @focus="searchInputToFocus"
       @keyup.enter="toSearch(statusStore.searchInputValue)"
+      @keyup.esc="closeSearchFocus"
       @contextmenu.stop="searchInpMenuRef?.openDropdown($event)"
       @click.stop
     >
@@ -19,12 +20,6 @@
         <SvgIcon :size="18" name="Search" />
       </template>
     </n-input>
-    <!-- 搜索框遮罩 -->
-    <Teleport to="body">
-      <Transition name="fade" mode="out-in">
-        <div v-show="statusStore.searchFocus" class="search-mask" @click.stop="closeSearchFocus" />
-      </Transition>
-    </Teleport>
     <!-- 默认内容 -->
     <SearchDefault v-if="settingStore.useOnlineService" @to-search="toSearch" />
     <!-- 搜索结果 -->
@@ -40,6 +35,7 @@ import { searchDefault } from "@/api/search";
 import { usePlayerController } from "@/core/player/PlayerController";
 import { songDetail } from "@/api/song";
 import { formatSongsList } from "@/utils/format";
+import { onClickOutside } from "@vueuse/core";
 import SearchInpMenu from "@/components/Menu/SearchInpMenu.vue";
 
 const router = useRouter();
@@ -53,6 +49,7 @@ const player = usePlayerController();
 const searchInpMenuRef = ref<InstanceType<typeof SearchInpMenu> | null>(null);
 
 // 搜索框数据
+const searchContainerRef = ref<HTMLElement | null>(null);
 const searchInputRef = ref<HTMLInputElement | null>(null);
 const searchPlaceholder = ref<string>(
   settingStore.useOnlineService ? "搜索音乐 / 视频" : "搜索本地音乐",
@@ -78,9 +75,10 @@ const syncSearchInput = () => {
   }
 };
 
-// 关闭搜索焦点（点击遮罩时）
+// 关闭搜索焦点（点击外部/按Esc时）
 const closeSearchFocus = () => {
   statusStore.searchFocus = false;
+  searchInputRef.value?.blur();
 
   const mode = settingStore.searchInputBehavior;
   switch (mode) {
@@ -94,6 +92,12 @@ const closeSearchFocus = () => {
       break;
   }
 };
+
+onClickOutside(searchContainerRef, () => {
+  if (statusStore.searchFocus) {
+    closeSearchFocus();
+  }
+});
 
 // 添加搜索历史
 const setSearchHistory = (keyword: string) => {
@@ -272,23 +276,6 @@ onMounted(() => {
       .search-input {
         width: 100%;
       }
-    }
-  }
-  .search-mask {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    z-index: 100;
-    background-color: #00000040;
-    backdrop-filter: blur(20px);
-    -webkit-app-region: no-drag;
-  }
-  @media (max-width: 768px) {
-    .search-mask {
-      background-color: rgba(8, 10, 14, 0.82);
-      backdrop-filter: none;
     }
   }
 }

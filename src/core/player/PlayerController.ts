@@ -1673,7 +1673,10 @@ class PlayerController {
    * @note 心跳模式只能通过菜单开启（传入 "heartbeat" 参数），点击随机按钮不会进入心跳模式
    * @note 当播放列表包含本地歌曲时，跳过心动模式，只在 Off 和 On 之间切换
    */
-  public async toggleShuffle(mode?: ShuffleModeType, options?: { notify?: boolean; force?: boolean }) {
+  public async toggleShuffle(
+    mode?: ShuffleModeType,
+    options?: { notify?: boolean; force?: boolean },
+  ) {
     const statusStore = useStatusStore();
     const currentMode = statusStore.shuffleMode;
     // 预判下一个模式
