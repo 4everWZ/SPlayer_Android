@@ -57,13 +57,13 @@
         </n-flex>
         <div class="center">
           <div class="btn">
-            <!-- 随机按钮 -->
+            <!-- 播放模式循环（左侧） -->
             <template v-if="musicStore.playSong.type !== 'radio' && !statusStore.personalFmMode">
-              <div class="btn-icon mode-icon" @click.stop="player.toggleShuffle()">
+              <div class="btn-icon mode-icon" @click.stop="player.cyclePlayMode()">
                 <SvgIcon
-                  :name="statusStore.shuffleIcon"
+                  :name="statusStore.playerModeIcon"
                   :size="20"
-                  :depth="statusStore.shuffleMode === 'off' ? 3 : 1"
+                  :depth="statusStore.playerModeKey === 'repeat-off' ? 3 : 1"
                 />
               </div>
             </template>
@@ -110,16 +110,16 @@
             <div class="btn-icon" v-debounce="() => player.nextOrPrev('next')">
               <SvgIcon :size="26" name="SkipNext" />
             </div>
-            <!-- 循环按钮 -->
-            <template v-if="musicStore.playSong.type !== 'radio' && !statusStore.personalFmMode">
-              <div class="btn-icon mode-icon" @click.stop="player.toggleRepeat()">
+            <!-- 桌面歌词开关（右侧） -->
+            <n-badge v-if="isElectron" value="ON" :show="statusStore.showDesktopLyric">
+              <div class="btn-icon mode-icon" @click.stop="player.toggleDesktopLyric()">
                 <SvgIcon
-                  :name="statusStore.repeatIcon"
+                  name="DesktopLyric2"
                   :size="20"
-                  :depth="statusStore.repeatMode === 'off' ? 3 : 1"
+                  :depth="statusStore.showDesktopLyric ? 1 : 3"
                 />
               </div>
-            </template>
+            </n-badge>
           </div>
           <!-- 进度条 -->
           <div
@@ -156,6 +156,7 @@ import { useTimeFormat } from "@/composables/useTimeFormat";
 import { openDownloadSong, openPlaylistAdd } from "@/utils/modal";
 import { getComment } from "@/api/comment";
 import { formatCommentCount } from "@/utils/format";
+import { isElectron } from "@/utils/env";
 
 const dataStore = useDataStore();
 const musicStore = useMusicStore();
