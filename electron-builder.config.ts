@@ -207,8 +207,13 @@ const config: Configuration = {
     mirror: "https://npmmirror.com/mirrors/electron/",
   },
   // 发布配置
-  // 先留空，不自动上传
-  publish: [],
+  publish: [
+    {
+      provider: "github",
+      owner: "4everWZ",
+      repo: "SPlayer_Android",
+    },
+  ],
 };
 
 export default config;

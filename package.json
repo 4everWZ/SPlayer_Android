@@ -7,9 +7,9 @@
   "main": "./out/main/index.js",
   "author": "imsyy",
   "home": "https://imsyy.top",
-  "github": "https://github.com/imsyy/SPlayer",
+  "github": "https://github.com/4everWZ/SPlayer_Android",
   "blog": "https://blog.imsyy.top",
-  "repository": "github:imsyy/SPlayer",
+  "repository": "github:4everWZ/SPlayer_Android",
   "license": "AGPL-3.0",
   "license-file": "LICENSE",
   "engines": {

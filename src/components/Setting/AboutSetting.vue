@@ -231,7 +231,7 @@ const allContributors = ref<DeveloperType[]>([]);
 const getContributors = async () => {
   try {
     const response = await fetch(
-      "https://api.github.com/repos/imsyy/SPlayer/contributors?per_page=100&anon=true",
+      "https://api.github.com/repos/4everWZ/SPlayer_Android/contributors?per_page=100&anon=true",
     );
     const data = await response.json();
     if (Array.isArray(data)) {

@@ -1741,7 +1741,7 @@ class PlayerController {
   public async cyclePlayMode() {
     const musicStore = useMusicStore();
     const statusStore = useStatusStore();
-    const modes: PlayerModeKey[] = ["repeat-off", "repeat-list", "repeat-one", "shuffle"];
+    const modes: PlayerModeKey[] = ["repeat-list", "repeat-off", "shuffle", "repeat-one"];
 
     if (
       !statusStore.personalFmMode &&

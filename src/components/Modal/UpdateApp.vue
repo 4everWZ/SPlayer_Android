@@ -89,7 +89,7 @@ const doInstall = () => {
 // 前往下载
 const goDownload = () => {
   emit("close");
-  void openExternalLink("https://splayer.imsyy.top/download.html");
+  void openExternalLink("https://github.com/4everWZ/SPlayer_Android/releases");
 };
 </script>
 
